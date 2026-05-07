@@ -403,5 +403,17 @@ class StockSelectorApp:
 
 
 if __name__ == "__main__":
-    app = StockSelectorApp()
-    app.run()
+    try:
+        app = StockSelectorApp()
+        app.run()
+    except Exception as e:
+        import traceback
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("启动错误", f"程序启动失败:\n{e}\n\n{traceback.format_exc()}")
+        except:
+            print(f"Fatal error: {e}")
+            traceback.print_exc()
