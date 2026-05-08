@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-智能选股系统 v3.0 - 专业级GUI
-股票池实时监控 + 策略详细分析 + 价位建议
+智能选股系统 v4.0 - 一键全扫专业版
+启动自动扫描全部股票 → 评分排序展示 → 点击查看详情
 
 功能：
-- 108只自选股实时行情监控
-- 11种选股策略详细分析（过/不过都展示原因）
-- 61种K线形态识别
-- 价位建议（支撑/阻力/买入/卖出/止损/目标）
+- 启动后自动全量扫描108只自选股（后台线程）
+- 股票池列表直接显示综合评分，按评分排序
+- 11种策略 + 61种K线形态 + 价位建议
 - 板块热点实时追踪
 """
 import tkinter as tk
@@ -18,7 +17,7 @@ import os
 import logging
 import time
 
-# 配置日志（控制台+文件）
+# 配置日志（只写文件）
 log_format = '%(asctime)s [%(levelname)s] %(message)s'
 log_file = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), 'debug.log')
 logging.basicConfig(
@@ -44,27 +43,28 @@ from selector import StockSelector
 # ═══════════════════════════════════════════════════════
 #  配色方案（专业深色Bloomberg风格）
 # ═══════════════════════════════════════════════════════
-C_BG       = "#0d1117"   # 主背景
-C_BG2      = "#161b22"   # 卡片背景
-C_BG3      = "#21262d"   # 行背景
-C_BG4      = "#2d333b"   # 悬停/选中
-C_FG       = "#e6edf3"   # 主文字
-C_FG2      = "#8b949e"   # 次要文字
-C_ACCENT   = "#58a6ff"   # 强调蓝
-C_GREEN    = "#3fb950"   # 涨/买
-C_RED      = "#f85149"   # 跌/卖
-C_YELLOW   = "#d29922"   # 警示/关注
-C_PURPLE   = "#bc8cff"   # 特殊标记
-C_BORDER   = "#30363d"   # 边框
+C_BG       = "#0d1117"
+C_BG2      = "#161b22"
+C_BG3      = "#21262d"
+C_BG4      = "#2d333b"
+C_FG       = "#e6edf3"
+C_FG2      = "#8b949e"
+C_ACCENT   = "#58a6ff"
+C_GREEN    = "#3fb950"
+C_RED      = "#f85149"
+C_YELLOW   = "#d29922"
+C_PURPLE   = "#bc8cff"
+C_BORDER   = "#30363d"
 
 # 字体
-FONT_TITLE = ("Microsoft YaHei", 15, "bold")
-FONT_MAIN  = ("Microsoft YaHei", 10)
-FONT_BOLD  = ("Microsoft YaHei", 10, "bold")
-FONT_CODE  = ("Consolas", 10)
-FONT_SMALL = ("Microsoft YaHei", 8)
-FONT_PRICE = ("Consolas", 22, "bold")
-FONT_SCORE = ("Consolas", 28, "bold")
+FONT_TITLE  = ("Microsoft YaHei", 14, "bold")
+FONT_MAIN   = ("Microsoft YaHei", 10)
+FONT_BOLD   = ("Microsoft YaHei", 10, "bold")
+FONT_CODE   = ("Consolas", 10)
+FONT_SMALL  = ("Microsoft YaHei", 8)
+FONT_PRICE  = ("Consolas", 20, "bold")
+FONT_SCORE  = ("Consolas", 24, "bold")
+FONT_SCAN   = ("Microsoft YaHei", 12, "bold")
 
 
 # ═══════════════════════════════════════════════════════
@@ -73,11 +73,14 @@ FONT_SCORE = ("Consolas", 28, "bold")
 class StockSelectorApp:
     def __init__(self):
         self.selector = StockSelector()
-        self._analyzing = False  # 防重复点击
+        self._analyzing = False
+        self._scanning = False          # 全局扫描状态
+        self.scan_results = {}          # code -> result dict
+        self.scan_progress = (0, 0)     # (当前, 总数)
         self.root = tk.Tk()
-        self.root.title("智能选股系统 v3.0")
-        self.root.geometry("1400x850")
-        self.root.minsize(1200, 700)
+        self.root.title("智能选股系统 v4.0")
+        self.root.geometry("1440x900")
+        self.root.minsize(1280, 720)
         self.root.configure(bg=C_BG)
 
         try:
@@ -89,7 +92,7 @@ class StockSelectorApp:
         self._build_ui()
         self._center_window()
 
-        # 定时刷新
+        # 启动：先刷新行情 → 再自动全扫
         self._refresh_pool()
         self._load_sectors()
         self._schedule_refresh()
@@ -103,63 +106,57 @@ class StockSelectorApp:
         top.pack(fill=tk.X, padx=0, pady=0)
         top.pack_propagate(False)
 
-        # Logo区
-        logo = tk.Label(top, text="📊 智能选股系统", font=FONT_TITLE, bg=C_BG2, fg=C_ACCENT)
-        logo.pack(side=tk.LEFT, padx=16, pady=0)
+        # Logo
+        tk.Label(top, text="📊 智能选股系统", font=FONT_TITLE, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=16, pady=0)
+        tk.Label(top, text="v4.0", font=FONT_SMALL, bg=C_BG2, fg=C_FG2).pack(side=tk.LEFT, padx=(2, 0), pady=14)
 
-        tk.Label(top, text="v3.0", font=FONT_SMALL, bg=C_BG2, fg=C_FG2).pack(side=tk.LEFT, padx=(2, 0), pady=14)
-
-        sep = tk.Frame(top, bg=C_BORDER, width=1)
-        sep.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
+        # 分隔
+        tk.Frame(top, bg=C_BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
 
         # 统计标签
-        self.stats_label = tk.Label(top, text="股票池: -- 只  |  加载中...", font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
+        self.stats_label = tk.Label(top, text="正在加载...", font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
         self.stats_label.pack(side=tk.LEFT, pady=14)
 
-        sep2 = tk.Frame(top, bg=C_BORDER, width=1)
-        sep2.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
+        # 扫描进度条区域
+        self.progress_frame = tk.Frame(top, bg=C_BG2)
+        self.progress_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=16, pady=14)
 
-        # 刷新按钮
-        self.refresh_btn = tk.Button(top, text="🔄 刷新行情", font=FONT_BOLD, bg=C_ACCENT, fg="white",
+        self.progress_label = tk.Label(self.progress_frame, text="", font=FONT_SMALL, bg=C_BG2, fg=C_ACCENT)
+        self.progress_label.pack(fill=tk.X)
+
+        # 分隔
+        tk.Frame(top, bg=C_BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
+
+        # 操作按钮
+        btn_frame = tk.Frame(top, bg=C_BG2)
+        btn_frame.pack(side=tk.RIGHT, padx=16, pady=8)
+
+        self.refresh_btn = tk.Button(btn_frame, text="🔄 刷新行情", font=FONT_BOLD, bg=C_ACCENT, fg="white",
                                      relief=tk.FLAT, cursor="hand2", command=self._refresh_pool)
-        self.refresh_btn.pack(side=tk.LEFT, pady=8, ipadx=12)
+        self.refresh_btn.pack(side=tk.LEFT, ipadx=10, ipady=3)
 
-        self.auto_btn = tk.Button(top, text="⏸ 停止自动", font=FONT_BOLD, bg=C_YELLOW, fg="white",
+        self.scan_btn = tk.Button(btn_frame, text="🔍 全量扫描", font=FONT_BOLD, bg=C_GREEN, fg="white",
+                                  relief=tk.FLAT, cursor="hand2", command=self._start_full_scan)
+        self.scan_btn.pack(side=tk.LEFT, padx=(6, 0), ipadx=10, ipady=3)
+
+        self.auto_btn = tk.Button(btn_frame, text="⏸ 停止自动", font=FONT_BOLD, bg=C_YELLOW, fg="white",
                                   relief=tk.FLAT, cursor="hand2", command=self._toggle_auto)
-        self.auto_btn.pack(side=tk.LEFT, pady=8, padx=6, ipadx=12)
+        self.auto_btn.pack(side=tk.LEFT, padx=(6, 0), ipadx=10, ipady=3)
 
-        # 搜索框
-        search_frame = tk.Frame(top, bg=C_BG2)
-        search_frame.pack(side=tk.RIGHT, padx=16, pady=8)
-
-        tk.Label(search_frame, text="分析股票:", font=FONT_MAIN, bg=C_BG2, fg=C_FG2).pack(side=tk.LEFT, padx=(0, 6))
-
-        self.code_var = tk.StringVar()
-        code_entry = tk.Entry(search_frame, textvariable=self.code_var, font=FONT_CODE, width=10,
-                              bg=C_BG3, fg=C_FG, insertbackground=C_FG, relief=tk.FLAT, bd=0)
-        code_entry.pack(side=tk.LEFT, ipady=5, padx=(0, 6))
-        code_entry.insert(0, "002539")
-        code_entry.bind("<Return>", lambda e: self._analyze_selected())
-
-        self.analyze_btn = tk.Button(search_frame, text="🔍 分析", font=FONT_BOLD, bg=C_ACCENT, fg="white",
-                                     relief=tk.FLAT, cursor="hand2", command=self._analyze_selected)
-        self.analyze_btn.pack(side=tk.LEFT, ipadx=14, ipady=3)
-
-        # ── 主体区域 (三栏) ──
+        # ── 主体三栏 ──
         body = tk.Frame(self.root, bg=C_BG)
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # 左侧：股票池列表 (35%)
+        # 左侧：股票池列表（带评分）
         self._build_pool_panel(body)
-        sep_v = tk.Frame(body, bg=C_BORDER, width=1)
-        sep_v.pack(side=tk.LEFT, fill=tk.Y, padx=0)
+        tk.Frame(body, bg=C_BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # 中间：分析详情 (65%)
+        # 右侧：分析详情
         self._build_detail_panel(body)
 
     def _build_pool_panel(self, body):
-        """左侧：股票池实时行情列表"""
-        left = tk.Frame(body, bg=C_BG, width=480)
+        """左侧：股票池列表（名称+代码+现价+涨跌幅+成交额+评分）"""
+        left = tk.Frame(body, bg=C_BG, width=520)
         left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 6))
         left.pack_propagate(False)
 
@@ -168,18 +165,25 @@ class StockSelectorApp:
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
         tk.Label(hdr, text="📋 自选股票池", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
-        self.pool_sort_label = tk.Label(hdr, text="按涨幅排序", font=FONT_SMALL, bg=C_BG2, fg=C_FG2)
+        self.pool_sort_label = tk.Label(hdr, text="按涨幅排序 | 点击查看详情", font=FONT_SMALL, bg=C_BG2, fg=C_FG2)
         self.pool_sort_label.pack(side=tk.RIGHT, padx=12, pady=8)
 
         # 表头
         col_hdr = tk.Frame(left, bg=C_BG3, height=30)
         col_hdr.pack(fill=tk.X)
         col_hdr.pack_propagate(False)
-        headers = [("名称/代码", 0, 110), ("现价", 110, 80), ("涨跌幅", 190, 90), ("成交额(万)", 280, 100), ("评分", 380, 60)]
+        headers = [
+            ("名称",         0,   90),
+            ("代码",         95,  70),
+            ("现价",        170,  70),
+            ("涨跌幅",      245,  80),
+            ("成交额(万)",  330,  90),
+            ("评分",        425,  60),
+        ]
         for txt, x, w in headers:
-            tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=x, y=6, width=w)
+            tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=x, y=7, width=w)
 
-        # 列表 (Canvas滚动)
+        # Canvas滚动列表
         list_frame = tk.Frame(left, bg=C_BG)
         list_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -189,41 +193,39 @@ class StockSelectorApp:
 
         self.pool_inner.bind("<Configure>",
             lambda e: self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all")))
-        self.pool_canvas.create_window((0, 0), window=self.pool_inner, anchor=tk.NW, width=self.pool_canvas.winfo_width())
+        self.canvas_win = self.pool_canvas.create_window((0, 0), window=self.pool_inner, anchor=tk.NW)
         self.pool_canvas.bind("<Configure>",
-            lambda e: self.pool_canvas.itemconfig(1, width=e.width))
+            lambda e: self.pool_canvas.itemconfig(self.canvas_win, width=e.width))
         self.pool_canvas.configure(yscrollcommand=pool_scroll.set)
 
         self.pool_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         pool_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 绑定双击
-        self.pool_canvas.bind("<Double-Button-1>", self._on_pool_double_click)
-        self.pool_inner.bind("<Double-Button-1>", self._on_pool_double_click)
+        # 绑定点击事件
+        for w in [self.pool_canvas, self.pool_inner]:
+            w.bind("<Button-1>", self._on_pool_click)
 
-        self.pool_items = []   # 存储行frame引用
-        self.pool_data = []    # 存储股票数据
+        self.pool_items = []
+        self.pool_data = []
 
     def _build_detail_panel(self, body):
         """右侧：分析详情"""
         right = tk.Frame(body, bg=C_BG)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # ── 顶部股票信息卡 ──
-        self.info_card = tk.Frame(right, bg=C_BG2, height=90)
+        # ── 信息卡 ──
+        self.info_card = tk.Frame(right, bg=C_BG2, height=88)
         self.info_card.pack(fill=tk.X, pady=(0, 6))
         self.info_card.pack_propagate(False)
         self._build_info_card(self.info_card)
 
-        # ── 中部：两栏 ──
+        # ── 中部两栏 ──
         mid = tk.Frame(right, bg=C_BG)
         mid.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
-        # 左侧：策略分析
         left_mid = tk.Frame(mid, bg=C_BG)
         left_mid.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # 右侧：价位建议
         right_mid = tk.Frame(mid, bg=C_BG, width=300)
         right_mid.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
         right_mid.pack_propagate(False)
@@ -231,49 +233,49 @@ class StockSelectorApp:
         self._build_strategy_panel(left_mid)
         self._build_price_panel(right_mid)
 
-        # ── 底部：板块热点 ──
+        # ── 底部板块 ──
         self._build_sector_panel(right)
 
     def _build_info_card(self, parent):
-        """股票信息卡片"""
-        self.card_name = tk.Label(parent, text="请从左侧股票池选择股票，或输入代码分析",
+        """顶部信息卡"""
+        self.card_name = tk.Label(parent, text="👈 请从左侧选择股票查看详情",
                                    font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
-        self.card_name.place(x=16, y=10, width=400)
+        self.card_name.place(x=16, y=8, width=420)
 
         self.card_price = tk.Label(parent, text="--", font=FONT_PRICE, bg=C_BG2, fg=C_FG)
-        self.card_price.place(x=16, y=36, width=160)
+        self.card_price.place(x=16, y=34, width=150)
 
         self.card_change = tk.Label(parent, text="--", font=("Consolas", 13), bg=C_BG2, fg=C_FG2)
-        self.card_change.place(x=170, y=44, width=120)
+        self.card_change.place(x=160, y=42, width=110)
 
-        # 评分
-        score_frame = tk.Frame(parent, bg=C_BG3)
-        score_frame.place(x=560, y=14, width=200, height=62)
+        # 评分区
+        score_bg = tk.Frame(parent, bg=C_BG3)
+        score_bg.place(x=520, y=12, width=180, height=64)
 
-        self.card_score = tk.Label(score_frame, text="--", font=FONT_SCORE, bg=C_BG3, fg=C_ACCENT)
-        self.card_score.place(x=0, y=0, width=80)
-        tk.Label(score_frame, text="综合评分", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=0, y=44, width=80)
+        self.card_score = tk.Label(score_bg, text="--", font=FONT_SCORE, bg=C_BG3, fg=C_ACCENT)
+        self.card_score.place(x=0, y=0, width=75)
+        tk.Label(score_bg, text="综合评分", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=0, y=44, width=75)
 
-        self.card_suggest = tk.Label(score_frame, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
-        self.card_suggest.place(x=90, y=16, width=100)
-        tk.Label(score_frame, text="操作建议", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=90, y=44, width=100)
+        self.card_suggest = tk.Label(score_bg, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
+        self.card_suggest.place(x=82, y=18, width=90)
+        tk.Label(score_bg, text="操作建议", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=82, y=44, width=90)
 
-        # 分割线
-        sep = tk.Frame(parent, bg=C_BORDER, height=1)
-        sep.place(x=0, y=82, relwidth=1)
+        # 匹配数
+        self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
+        self.card_matched.place(x=82, y=38, width=90)
+
+        tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=80, relwidth=1)
 
     def _build_strategy_panel(self, parent):
         """策略分析面板"""
-        hdr = tk.Frame(parent, bg=C_BG2, height=36)
+        hdr = tk.Frame(parent, bg=C_BG2, height=34)
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="📊 策略分析结果  (✅=通过  ❌=未通过)", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+        tk.Label(hdr, text="📊 策略分析  (✅通过  ❌未通过)", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=6)
 
-        # 策略列表容器
         list_container = tk.Frame(parent, bg=C_BG)
         list_container.pack(fill=tk.BOTH, expand=True)
 
-        # 策略字典: name -> {frame, status_label, reason_label, score_label}
         self.strategy_widgets = {}
 
         strategies = [
@@ -292,122 +294,288 @@ class StockSelectorApp:
 
         for i, (name, desc) in enumerate(strategies):
             row_bg = C_BG2 if i % 2 == 0 else C_BG
-            f = tk.Frame(list_container, bg=row_bg, height=38)
+            f = tk.Frame(list_container, bg=row_bg, height=36)
             f.pack(fill=tk.X, padx=4, pady=1)
             f.pack_propagate(False)
 
-            # 状态图标
-            status = tk.Label(f, text="--", font=("Consolas", 13), bg=row_bg, fg=C_FG2, width=4, anchor=tk.CENTER)
-            status.pack(side=tk.LEFT, padx=(8, 4), pady=6)
+            status = tk.Label(f, text="--", font=("Consolas", 12), bg=row_bg, fg=C_FG2, width=3, anchor=tk.CENTER)
+            status.pack(side=tk.LEFT, padx=(8, 4), pady=5)
 
-            # 策略名
-            name_lbl = tk.Label(f, text=name, font=FONT_BOLD, bg=row_bg, fg=C_FG, width=10, anchor=tk.W)
-            name_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=6)
+            name_lbl = tk.Label(f, text=name, font=FONT_BOLD, bg=row_bg, fg=C_FG, width=9, anchor=tk.W)
+            name_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
-            # 原因/条件
             reason_lbl = tk.Label(f, text=desc, font=FONT_SMALL, bg=row_bg, fg=C_FG2, anchor=tk.W)
-            reason_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=6, fill=tk.X, expand=True)
+            reason_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=5, fill=tk.X, expand=True)
 
-            # 评分
-            score_lbl = tk.Label(f, text="-", font=FONT_CODE, bg=row_bg, fg=C_FG2, width=6, anchor=tk.E)
-            score_lbl.pack(side=tk.RIGHT, padx=10, pady=6)
+            score_lbl = tk.Label(f, text="-", font=FONT_CODE, bg=row_bg, fg=C_FG2, width=5, anchor=tk.E)
+            score_lbl.pack(side=tk.RIGHT, padx=10, pady=5)
 
             self.strategy_widgets[name] = {
-                "frame": f,
-                "status": status,
-                "reason": reason_lbl,
-                "score": score_lbl,
-                "bg": row_bg,
+                "frame": f, "status": status, "reason": reason_lbl,
+                "score": score_lbl, "bg": row_bg,
             }
 
     def _build_price_panel(self, parent):
         """价位建议面板"""
-        hdr = tk.Frame(parent, bg=C_BG2, height=36)
+        hdr = tk.Frame(parent, bg=C_BG2, height=34)
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="💰 价位建议", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+        tk.Label(hdr, text="💰 价位建议", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=6)
 
         self.price_container = tk.Frame(parent, bg=C_BG)
-        self.price_container.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.price_container.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        # 当前价
-        self.price_current = tk.Label(self.price_container, text="现价  --", font=("Consolas", 16, "bold"),
-                                      bg=C_BG, fg=C_FG)
-        self.price_current.pack(anchor=tk.W, pady=(0, 6))
+        self.price_current = tk.Label(self.price_container, text="现价  --", font=("Consolas", 15, "bold"), bg=C_BG, fg=C_FG)
+        self.price_current.pack(anchor=tk.W, pady=(0, 4))
 
-        # 支撑位
-        self.price_support = tk.Label(self.price_container, text="支撑位  --", font=FONT_MAIN,
-                                      bg=C_BG, fg=C_GREEN)
-        self.price_support.pack(anchor=tk.W, pady=2)
+        self.price_support = tk.Label(self.price_container, text="支撑位  --", font=FONT_MAIN, bg=C_BG, fg=C_GREEN)
+        self.price_support.pack(anchor=tk.W, pady=1)
+        self.price_resist = tk.Label(self.price_container, text="阻力位  --", font=FONT_MAIN, bg=C_BG, fg=C_RED)
+        self.price_resist.pack(anchor=tk.W, pady=1)
 
-        # 阻力位
-        self.price_resist = tk.Label(self.price_container, text="阻力位  --", font=FONT_MAIN,
-                                    bg=C_BG, fg=C_RED)
-        self.price_resist.pack(anchor=tk.W, pady=2)
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=5)
 
-        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
+        self.price_buy = tk.Label(self.price_container, text="建议买入区间  --", font=FONT_BOLD, bg=C_BG, fg=C_GREEN)
+        self.price_buy.pack(anchor=tk.W, pady=1)
+        self.price_sell = tk.Label(self.price_container, text="建议卖出区间  --", font=FONT_BOLD, bg=C_BG, fg=C_RED)
+        self.price_sell.pack(anchor=tk.W, pady=1)
+        self.price_stop = tk.Label(self.price_container, text="止损价  --", font=FONT_MAIN, bg=C_BG, fg=C_YELLOW)
+        self.price_stop.pack(anchor=tk.W, pady=1)
+        self.price_target = tk.Label(self.price_container, text="目标价  --", font=FONT_MAIN, bg=C_BG, fg=C_ACCENT)
+        self.price_target.pack(anchor=tk.W, pady=1)
 
-        # 买入区间
-        self.price_buy = tk.Label(self.price_container, text="建议买入区间  --", font=FONT_BOLD,
-                                  bg=C_BG, fg=C_GREEN)
-        self.price_buy.pack(anchor=tk.W, pady=2)
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=5)
 
-        # 卖出区间
-        self.price_sell = tk.Label(self.price_container, text="建议卖出区间  --", font=FONT_BOLD,
-                                   bg=C_BG, fg=C_RED)
-        self.price_sell.pack(anchor=tk.W, pady=2)
+        self.price_ratio = tk.Label(self.price_container, text="风险收益比  --", font=FONT_MAIN, bg=C_BG, fg=C_FG2)
+        self.price_ratio.pack(anchor=tk.W, pady=1)
 
-        # 止损位
-        self.price_stop = tk.Label(self.price_container, text="止损价  --", font=FONT_MAIN,
-                                   bg=C_BG, fg=C_YELLOW)
-        self.price_stop.pack(anchor=tk.W, pady=2)
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=5)
 
-        # 目标价
-        self.price_target = tk.Label(self.price_container, text="目标价  --", font=FONT_MAIN,
-                                     bg=C_BG, fg=C_ACCENT)
-        self.price_target.pack(anchor=tk.W, pady=2)
-
-        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
-
-        # 风险收益比
-        self.price_ratio = tk.Label(self.price_container, text="风险收益比  --", font=FONT_MAIN,
-                                    bg=C_BG, fg=C_FG2)
-        self.price_ratio.pack(anchor=tk.W, pady=2)
-
-        # 价位理由
-        self.price_reason = tk.Label(self.price_container, text="", font=FONT_SMALL,
-                                    bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
-        self.price_reason.pack(anchor=tk.W, pady=4)
-
-        # K线形态
-        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
         tk.Label(self.price_container, text="🎯 K线形态", font=FONT_BOLD, bg=C_BG, fg=C_ACCENT).pack(anchor=tk.W, pady=2)
-        self.price_patterns = tk.Label(self.price_container, text="暂无形态", font=FONT_SMALL,
-                                       bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
+        self.price_patterns = tk.Label(self.price_container, text="暂无形态", font=FONT_SMALL, bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
         self.price_patterns.pack(anchor=tk.W, pady=2)
 
     def _build_sector_panel(self, parent):
         """底部板块热点"""
-        bottom = tk.Frame(parent, bg=C_BG2, height=90)
+        bottom = tk.Frame(parent, bg=C_BG2, height=86)
         bottom.pack(fill=tk.X, pady=(6, 0))
         bottom.pack_propagate(False)
 
-        tk.Label(bottom, text="🔥 板块热点", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).place(x=12, y=8)
+        tk.Label(bottom, text="🔥 板块热点", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).place(x=12, y=6)
 
-        # 板块容器
         self.sector_container = tk.Frame(bottom, bg=C_BG2)
-        self.sector_container.place(x=12, y=32, relwidth=1, relheight=1)
+        self.sector_container.place(x=12, y=30, relwidth=1, relheight=1)
         self.sector_labels = []
 
-        # 预设20个标签槽位
-        for i in range(20):
-            lbl = tk.Label(self.sector_container, text="--", font=FONT_SMALL, bg=C_BG3, fg=C_FG,
-                           padx=8, pady=2, relief=tk.FLAT)
+        for i in range(22):
+            lbl = tk.Label(self.sector_container, text="--", font=FONT_SMALL, bg=C_BG3, fg=C_FG, padx=8, pady=2)
             lbl.pack(side=tk.LEFT, padx=2, pady=2)
             self.sector_labels.append(lbl)
 
     # ───────────────────────────────────────────────
-    #  事件 & 业务逻辑
+    #  全量扫描（核心功能！）
+    # ───────────────────────────────────────────────
+    def _start_full_scan(self):
+        """启动全量扫描"""
+        if self._scanning:
+            logger.info("扫描进行中，忽略重复请求")
+            return
+        self._do_full_scan()
+
+    def _do_full_scan(self):
+        """执行全量扫描（后台线程）"""
+        self._scanning = True
+        self.scan_results.clear()
+        self.scan_btn.configure(text="⏳ 扫描中...", state=tk.DISABLED, bg=C_YELLOW)
+        self.progress_label.configure(text="🔄 开始全量扫描 108 只股票...")
+
+        codes = list(self.selector.pool_codes)
+        total = len(codes)
+
+        def do_scan():
+            ok_count = 0
+            fail_count = 0
+            for i, code in enumerate(codes):
+                try:
+                    logger.info(f"[全扫 {i+1}/{total}] 分析 {code} {self.selector.pool_names.get(code,'')}")
+                    result = self.selector.analyze(code)
+
+                    if "error" not in result:
+                        self.scan_results[code] = result
+                        ok_count += 1
+                    else:
+                        fail_count += 1
+
+                    # 更新进度UI
+                    pct = (i + 1) * 100 // total
+                    name = self.selector.pool_names.get(code, code)
+                    self.root.after(0, lambda c=code, n=name, p=pct, cur=i+1, t=total:
+                        self._update_scan_progress(cur, t, c, n))
+
+                except Exception as e:
+                    fail_count += 1
+                    logger.error(f"[全扫 {i+1}/{total}] {code} 异常: {e}")
+
+                import time
+                time.sleep(0.12)  # 控制频率
+
+            # 扫描完成
+            logger.info(f"=== 全量扫描完成: 成功{ok_count}, 失败{fail_count}")
+            self.root.after(0, lambda: self._on_scan_complete(ok_count, fail_count))
+
+        threading.Thread(target=do_scan, daemon=True).start()
+
+    def _update_scan_progress(self, current, total, code, name):
+        """更新扫描进度条"""
+        pct = current * 100 // total
+        bar_len = 25
+        filled = current * bar_len // total
+        bar = "█" * filled + "░" * (bar_len - filled)
+        self.progress_label.configure(
+            text=f"🔍 扫描中 [{bar}] {pct}% ({current}/{total})  {code} {name}"
+        )
+
+    def _on_scan_complete(self, ok_count, fail_count):
+        """扫描完成回调"""
+        self._scanning = False
+        self.scan_btn.configure(text="🔍 全量扫描", state=tk.NORMAL, bg=C_GREEN)
+        self.progress_label.configure(
+            text=f"✅ 全量扫描完成! 成功{ok_count}只 | 失败{fail_count}只 | 按评分排序显示"
+        )
+
+        # 用扫描结果重新渲染股票池列表（带评分！）
+        self._show_pool_with_scores()
+
+    def _show_pool_with_scores(self):
+        """用扫描结果重新渲染股票池（带评分）"""
+        # 合并行情数据 + 评分数据
+        scored_pool = []
+        for q in self.pool_data:
+            code = q.get("code", "")
+            if code in self.scan_results:
+                r = self.scan_results[code]
+                q["score"] = r.get("total_score", 0)
+                q["suggestion"] = r.get("suggestion", "")
+                q["matched"] = r.get("matched_count", 0)
+            else:
+                q["score"] = -1  # 未扫描
+                q["suggestion"] = ""
+                q["matched"] = 0
+            scored_pool.append(q)
+
+        # 按评分降序排列
+        scored_pool.sort(key=lambda x: x.get("score", -1), reverse=True)
+
+        # 更新排序标签
+        self.pool_sort_label.configure(text="按评分排序 ↓ | 点击查看详情")
+
+        # 清空重新渲染
+        for w in self.pool_inner.winfo_children():
+            w.destroy()
+        self.pool_items.clear()
+        self.pool_data.clear()
+        self.pool_data = scored_pool
+
+        for i, q in enumerate(scored_pool):
+            try:
+                code = q.get("code", "")
+                name = q.get("name", code) or code
+                price = q.get("price", 0) or 0
+                change = q.get("change_pct", 0) or 0
+                amount = q.get("amount", 0) or 0
+                amount_w = amount / 1e4 if amount else 0
+                score = q.get("score", -1)
+                matched = q.get("matched", 0)
+
+                row_bg = C_BG3 if i % 2 == 0 else C_BG
+                # 高分行特殊背景
+                if score >= 60:
+                    row_bg = "#0d2117"  # 绿底
+                elif score >= 40:
+                    row_bg = "#1d260d"
+
+                f = tk.Frame(self.pool_inner, bg=row_bg, height=34, cursor="hand2")
+                f.pack(fill=tk.X, padx=0, pady=0)
+                f.pack_propagate(False)
+
+                # 名称
+                name_color = C_GREEN if change >= 0 else C_RED
+                tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
+                         width=9, anchor=tk.W).place(x=6, y=7)
+
+                # 代码
+                tk.Label(f, text=f"{code}", font=FONT_CODE, bg=row_bg, fg=C_FG2,
+                         width=7, anchor=tk.W).place(x=96, y=9)
+
+                # 现价
+                price_color = C_GREEN if change >= 0 else C_RED
+                price_str = f"{price:.2f}" if price else "--"
+                tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
+                         width=8, anchor=tk.E).place(x=170, y=8)
+
+                # 涨跌幅
+                change_str = f"{change:+.2f}%" if change else "--"
+                tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=price_color,
+                         width=9, anchor=tk.E).place(x=248, y=8)
+
+                # 成交额
+                amount_str = f"{amount_w:.0f}" if amount_w else "--"
+                tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                         width=10, anchor=tk.E).place(x=332, y=8)
+
+                # 评分（核心！）
+                if score >= 0:
+                    if score >= 70:
+                        sc_color = C_GREEN
+                        sc_text = f"{score}"
+                    elif score >= 45:
+                        sc_color = C_YELLOW
+                        sc_text = f"{score}"
+                    elif score >= 20:
+                        sc_color = C_FG2
+                        sc_text = f"{score}"
+                    else:
+                        sc_color = C_RED
+                        sc_text = f"{score}"
+
+                    # 评分数字
+                    sc_lbl = tk.Label(f, text=sc_text, font=FONT_BOLD, bg=row_bg, fg=sc_color,
+                                      width=5, anchor=tk.CENTER)
+                    sc_lbl.place(x=430, y=7)
+
+                    # 通过数小标记
+                    if matched > 0:
+                        m_lbl = tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
+                                         width=4, anchor=tk.W)
+                        m_lbl.place(x=462, y=10)
+                else:
+                    tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                             width=5, anchor=tk.CENTER).place(x=430, y=8)
+
+                # 绑定事件
+                f.code_ref = code
+                f.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
+                for child in f.winfo_children():
+                    child.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
+
+                self.pool_items.append(f)
+
+            except Exception as e:
+                logger.error(f"渲染第{i}行失败: {e}")
+                continue
+
+        # 更新Canvas
+        self.pool_inner.update_idletasks()
+        self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all"))
+
+        # 更新统计
+        high_score = len([q for q in scored_pool if q.get("score", 0) >= 50])
+        self.stats_label.configure(
+            text=f"股票池: {len(scored_pool)} 只  |  ⭐ ≥50分: {high_score}只  |  扫描完成 {time.strftime('%H:%M:%S')}"
+        )
+
+    # ───────────────────────────────────────────────
+    #  行情刷新 & 事件
     # ───────────────────────────────────────────────
     def _refresh_pool(self):
         """刷新股票池实时行情"""
@@ -417,27 +585,21 @@ class StockSelectorApp:
         def do_refresh():
             try:
                 quotes = self.selector.get_pool_realtime()
-                logger.info(f"=== get_pool_realtime 返回 {len(quotes)} 只股票")
-                if quotes:
-                    logger.info(f"=== 第一只: {quotes[0]}")
+                logger.info(f"get_pool_realtime 返回 {len(quotes)} 只")
                 self.root.after(0, lambda: self._show_pool(quotes))
             except Exception as e:
                 logger.error(f"刷新行情失败: {e}")
-                import traceback
-                logger.error(f"刷新行情异常堆栈: {traceback.format_exc()}")
-                self.root.after(0, lambda: self._show_error(f"刷新行情失败: {e}"))
+                self.root.after(0, lambda: self._show_error(f"刷新失败: {e}"))
                 self.root.after(0, lambda: self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL))
 
         threading.Thread(target=do_refresh, daemon=True).start()
 
     def _show_pool(self, quotes):
-        """显示股票池列表"""
+        """显示股票池列表（纯行情，无评分——扫描完成后会覆盖为带评分版本）"""
         try:
-            logger.info(f"=== _show_pool 被调用, quotes数量={len(quotes) if quotes else 0}")
             self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL)
             self.stats_label.configure(text=f"股票池: {len(quotes)} 只  |  更新时间 {time.strftime('%H:%M:%S')}")
 
-            # 清空
             for w in self.pool_inner.winfo_children():
                 w.destroy()
             self.pool_items.clear()
@@ -445,201 +607,148 @@ class StockSelectorApp:
 
             if not quotes:
                 tk.Label(self.pool_inner, text="暂无数据，请检查网络", font=FONT_MAIN, bg=C_BG, fg=C_RED).pack(pady=20)
-                logger.warning("=== _show_pool: quotes为空，显示暂无数据")
                 return
 
-            # 按涨幅排序
             try:
                 quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
-            except Exception as e:
-                logger.error(f"=== 排序失败: {e}")
+            except Exception:
+                pass
 
-            logger.info(f"=== _show_pool: 开始渲染 {len(quotes)} 只股票...")
-
-            # ── 渲染每一行 ──
             for i, q in enumerate(quotes):
                 try:
                     code = q.get("code", "")
                     name = q.get("name", code) or code
                     price = q.get("price", 0) or 0
                     change = q.get("change_pct", 0) or 0
-                    amount = q.get("amount", 0) or 0  # 元
+                    amount = q.get("amount", 0) or 0
                     amount_w = amount / 1e4 if amount else 0
 
                     row_bg = C_BG3 if i % 2 == 0 else C_BG
-                    f = tk.Frame(self.pool_inner, bg=row_bg, height=32, cursor="hand2")
+                    f = tk.Frame(self.pool_inner, bg=row_bg, height=34, cursor="hand2")
                     f.pack(fill=tk.X, padx=0, pady=0)
                     f.pack_propagate(False)
 
-                    # 名称+代码
                     name_color = C_GREEN if change >= 0 else C_RED
                     tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
-                             width=8, anchor=tk.W).place(x=8, y=6)
-                    tk.Label(f, text=f"{code}", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                             width=8, anchor=tk.W).place(x=8, y=20)
+                             width=9, anchor=tk.W).place(x=6, y=7)
+                    tk.Label(f, text=f"{code}", font=FONT_CODE, bg=row_bg, fg=C_FG2,
+                             width=7, anchor=tk.W).place(x=96, y=9)
 
-                    # 现价
                     price_color = C_GREEN if change >= 0 else C_RED
                     price_str = f"{price:.2f}" if price else "--"
                     tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
-                             width=9, anchor=tk.E).place(x=108, y=8)
+                             width=8, anchor=tk.E).place(x=170, y=8)
 
-                    # 涨跌幅
                     change_str = f"{change:+.2f}%" if change else "--"
-                    change_color = C_GREEN if change >= 0 else C_RED
-                    tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=change_color,
-                             width=10, anchor=tk.E).place(x=192, y=8)
+                    tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=price_color,
+                             width=9, anchor=tk.E).place(x=248, y=8)
 
-                    # 成交额(万)
                     amount_str = f"{amount_w:.0f}" if amount_w else "--"
                     tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                             width=11, anchor=tk.E).place(x=280, y=8)
+                             width=10, anchor=tk.E).place(x=332, y=8)
 
-                    # 评分占位（待分析）
                     tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                             width=8, anchor=tk.E).place(x=378, y=8)
+                             width=5, anchor=tk.CENTER).place(x=430, y=8)
 
-                    # 保存数据
                     q["row_bg"] = row_bg
                     self.pool_data.append(q)
 
-                    # 绑定事件
-                    f.bind("<Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
-                    f.bind("<Double-Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
-
+                    f.code_ref = code
+                    f.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
                     for child in f.winfo_children():
-                        child.bind("<Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
-                        child.bind("<Double-Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
+                        child.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
 
                     self.pool_items.append(f)
                 except Exception as e:
-                    logger.error(f"=== 渲染第{i}行({q.get('code','?')})失败: {e}")
+                    logger.error(f"渲染第{i}行失败: {e}")
                     continue
 
-            # 强制更新Canvas滚动区域
             self.pool_inner.update_idletasks()
             self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all"))
-            logger.info(f"=== _show_pool 渲染完成: {len(self.pool_items)} 行, canvas bbox={self.pool_canvas.bbox('all')}")
+            logger.info(f"_show_pool 渲染完成: {len(self.pool_items)} 行")
 
         except Exception as e:
-            logger.error(f"=== _show_pool 失败: {e}")
-            import traceback
-            logger.error(f"=== 异常堆栈: {traceback.format_exc()}")
+            logger.error(f"_show_pool 失败: {e}")
+
+    def _select_and_show(self, code):
+        """选中股票并显示分析结果"""
+        # 如果已经扫描过，直接显示
+        if code in self.scan_results:
+            self._select_stock(code)
+            self._show_analysis(self.scan_results[code])
+        else:
+            # 没扫描过，现场分析
+            self._select_stock(code)
+            self._analyze_single(code)
+
+    def _analyze_single(self, code):
+        """分析单只股票"""
+        if self._analyzing:
+            return
+        self._analyzing = True
+        self.card_name.configure(text=f"正在分析 {code}...", fg=C_FG2)
+
+        def do_analyze():
+            try:
+                result = self.selector.analyze(code)
+                self.scan_results[code] = result  # 缓存
+                self.root.after(0, lambda: self._show_analysis(result))
+            except Exception as e:
+                self.root.after(0, lambda: self._show_error(str(e)))
+            finally:
+                self._analyzing = False
+
+        threading.Thread(target=do_analyze, daemon=True).start()
 
     def _select_stock(self, code):
-        """选中股票"""
-        # 同步输入框
-        self.code_var.set(code)
-        # 清除之前选中
-        for f, old_code in zip(self.pool_items, [q["code"] for q in self.pool_data]):
-            bg = next((q["row_bg"] for q in self.pool_data if q["code"] == old_code), C_BG)
-            f.configure(bg=bg)
-            for child in f.winfo_children():
-                try:
-                    child.configure(bg=bg)
-                except:
-                    pass
+        """选中高亮"""
+        for f in self.pool_items:
+            try:
+                bg = C_BG3 if self.pool_items.index(f) % 2 == 0 else C_BG
+                # 检查是否有高分背景
+                idx = self.pool_items.index(f)
+                if idx < len(self.pool_data):
+                    sc = self.pool_data[idx].get("score", -1)
+                    if sc >= 60:
+                        bg = "#0d2117"
+                    elif sc >= 40:
+                        bg = "#1d260d"
+                f.configure(bg=bg)
+                for ch in f.winfo_children():
+                    try:
+                        ch.configure(bg=bg)
+                    except:
+                        pass
+            except:
+                pass
 
-        # 标记选中
-        idx = next((i for i, q in enumerate(self.pool_data) if q["code"] == code), -1)
+        idx = next((i for i, q in enumerate(self.pool_data) if q.get("code") == code), -1)
         if idx >= 0:
             f = self.pool_items[idx]
             f.configure(bg=C_BG4)
-            for child in f.winfo_children():
+            for ch in f.winfo_children():
                 try:
-                    child.configure(bg=C_BG4)
+                    ch.configure(bg=C_BG4)
                 except:
                     pass
 
         self.selected_code = code
 
     def _on_pool_click(self, event):
-        """单击股票行 → 选中+分析"""
-        # 找到点击位置最近的 pool_item
-        cx, cy = event.x, event.y
+        """单击事件"""
+        cy = event.y
         for i, f in enumerate(self.pool_items):
             if f.winfo_exists() and f.winfo_ismapped():
-                bbox = (f.winfo_x(), f.winfo_y(),
-                        f.winfo_x() + f.winfo_width(),
-                        f.winfo_y() + f.winfo_height())
-                if bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]:
-                    code = self.pool_data[i].get("code", "")
+                h = f.winfo_height()
+                if 0 <= cy <= h:
+                    code = getattr(f, 'code_ref', None)
                     if code:
-                        self._select_stock(code)
-                        self._analyze_stock(code)
+                        self._select_and_show(code)
                     break
-
-    def _on_pool_double_click(self, event):
-        """双击 → 同上（单双击都分析）"""
-        self._on_pool_click(event)
-
-    def _select_and_analyze(self, code):
-        """选中+分析（统一入口）"""
-        self._select_stock(code)
-        self.root.after(50, self._analyze_stock, code)
-
-    def _analyze_stock(self, code):
-        """分析指定股票"""
-        self.selected_code = code
-        self._analyze_selected()
-
-    # 防重复点击标记（在__init__中初始化）
-
-    def _analyze_selected(self):
-        """分析当前选中的或输入框的股票"""
-        logger.info(f"=== _analyze_selected called, _analyzing={self._analyzing}")
-        if self._analyzing:
-            logger.info("=== 正在分析中，忽略重复点击")
-            return  # 防止重复点击
-        
-        # 选中代码优先（点击列表触发），输入框作为手动备用
-        input_code = self.code_var.get().strip()
-        selected_code = getattr(self, 'selected_code', None)
-        if selected_code:
-            code = selected_code
-            logger.info(f"=== 使用选中代码(点击): {code}")
-        elif input_code:
-            code = input_code
-            self.selected_code = input_code  # 同步
-            logger.info(f"=== 使用输入框代码(手动): {code}")
-        else:
-            code = ""
-            logger.info(f"=== 无代码")
-        
-        logger.info(f"=== 准备分析股票: code={code}")
-        if not code:
-            logger.info("=== 无股票代码，返回")
-            return
-
-        self._analyzing = True
-        logger.info(f"=== _analyzing 设为 True")
-        self.analyze_btn.configure(text="⏳ 分析中...", state=tk.DISABLED)
-        self.card_name.configure(text=f"正在分析 {code}...", fg=C_FG2)
-
-        def do_analyze():
-            logger.info(f"=== do_analyze 线程启动, code={code}")
-            try:
-                logger.info("=== 调用 self.selector.analyze...")
-                result = self.selector.analyze(code)
-                logger.info(f"=== analyze 返回: {result.keys() if isinstance(result, dict) else '非字典'}")
-                self.root.after(0, lambda: self._show_analysis(result))
-            except Exception as e:
-                logger.error(f"=== 分析失败: {e}")
-                import traceback
-                logger.error(f"=== 异常堆栈: {traceback.format_exc()}")
-                self.root.after(0, lambda: self._show_error(str(e)))
-            finally:
-                # 确保无论成功失败都恢复状态
-                logger.info(f"=== finally: _analyzing 设为 False")
-                self._analyzing = False
-
-        logger.info("=== 启动分析线程...")
-        threading.Thread(target=do_analyze, daemon=True).start()
+            cy -= f.winfo_height() if (f.winfo_exists() and f.winfo_ismapped()) else 0
 
     def _show_analysis(self, result):
-        """显示分析结果"""
-        self.analyze_btn.configure(text="🔍 分析", state=tk.NORMAL)
-
+        """显示分析结果到右侧面板"""
         if "error" in result:
             self._show_error(result["error"])
             return
@@ -673,30 +782,34 @@ class StockSelectorApp:
             sug_color = C_FG2
         self.card_suggest.configure(text=sug, fg=sug_color)
 
-        # 更新策略列表
-        for name_s, s_info in self.strategy_widgets.items():
+        matched = result.get("matched_count", 0)
+        self.card_matched.configure(text=f"通过{matched}/11策略")
+
+        # 策略列表
+        for sname_s, s_info in self.strategy_widgets.items():
+            orig_bg = s_info["bg"]
             s_info["status"].configure(text="--", fg=C_FG2)
             s_info["reason"].configure(text="未分析", fg=C_FG2)
             s_info["score"].configure(text="-", fg=C_FG2)
-            s_info["frame"].configure(bg=s_info["bg"])
-            for child in s_info["frame"].winfo_children():
+            s_info["frame"].configure(bg=orig_bg)
+            for ch in s_info["frame"].winfo_children():
                 try:
-                    child.configure(bg=s_info["bg"])
+                    ch.configure(bg=orig_bg)
                 except:
                     pass
 
         for s in result.get("strategies", []):
-            sname, matched, reason, score_val = s
+            sname, matched_s, reason, score_val = s
             if sname in self.strategy_widgets:
                 w = self.strategy_widgets[sname]
-                if matched:
+                if matched_s:
                     w["status"].configure(text="✅", fg=C_GREEN)
                     w["reason"].configure(text=reason, fg=C_GREEN)
                     w["score"].configure(text=f"{score_val}", fg=C_GREEN)
                     w["frame"].configure(bg="#0d2117")
-                    for child in w["frame"].winfo_children():
+                    for ch in w["frame"].winfo_children():
                         try:
-                            child.configure(bg="#0d2117")
+                            ch.configure(bg="#0d2117")
                         except:
                             pass
                 else:
@@ -708,28 +821,16 @@ class StockSelectorApp:
         self.price_current.configure(text=f"现价  ¥{price:.2f}" if price else "现价  --")
 
         sup_levels = result.get("support_levels", [])
-        if sup_levels:
-            self.price_support.configure(text=f"支撑位  {' / '.join([f'{s:.2f}' for s in sup_levels])}")
-        else:
-            self.price_support.configure(text="支撑位  --")
+        self.price_support.configure(text=f"支撑位  {' / '.join([f'{s:.2f}' for s in sup_levels])}" if sup_levels else "支撑位  --")
 
         res_levels = result.get("resistance_levels", [])
-        if res_levels:
-            self.price_resist.configure(text=f"阻力位  {' / '.join([f'{r:.2f}' for r in res_levels])}")
-        else:
-            self.price_resist.configure(text="阻力位  --")
+        self.price_resist.configure(text=f"阻力位  {' / '.join([f'{r:.2f}' for r in res_levels])}" if res_levels else "阻力位  --")
 
         buy_zone = result.get("buy_zone", {})
-        if buy_zone and buy_zone.get("low"):
-            self.price_buy.configure(text=f"建议买入区间  ¥{buy_zone['low']:.2f} ~ ¥{buy_zone['high']:.2f}")
-        else:
-            self.price_buy.configure(text="建议买入区间  --")
+        self.price_buy.configure(text=f"建议买入区间  ¥{buy_zone['low']:.2f} ~ ¥{buy_zone['high']:.2f}" if buy_zone and buy_zone.get("low") else "建议买入区间  --")
 
         sell_zone = result.get("sell_zone", {})
-        if sell_zone and sell_zone.get("low"):
-            self.price_sell.configure(text=f"建议卖出区间  ¥{sell_zone['low']:.2f} ~ ¥{sell_zone['high']:.2f}")
-        else:
-            self.price_sell.configure(text="建议卖出区间  --")
+        self.price_sell.configure(text=f"建议卖出区间  ¥{sell_zone['low']:.2f} ~ ¥{sell_zone['high']:.2f}" if sell_zone and sell_zone.get("low") else "建议卖出区间  --")
 
         stop = result.get("stop_loss", 0)
         self.price_stop.configure(text=f"止损价  ¥{stop:.2f}" if stop else "止损价  --")
@@ -739,12 +840,11 @@ class StockSelectorApp:
 
         ratio = result.get("risk_reward_ratio", 0)
         if ratio:
-            ratio_color = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
-            self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=ratio_color)
+            rc = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
+            self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=rc)
         else:
             self.price_ratio.configure(text="风险收益比  --")
 
-        # 形态
         patterns = result.get("patterns", [])
         if patterns:
             p_text = "  ".join([
@@ -755,27 +855,21 @@ class StockSelectorApp:
         else:
             self.price_patterns.configure(text="暂无明确形态", fg=C_FG2)
 
-        # 选中该股票在列表中的行
         self._select_stock(result["code"])
 
     def _show_error(self, msg):
-        """显示错误"""
-        self.analyze_btn.configure(text="🔍 分析", state=tk.NORMAL)
-        self.card_name.configure(text=f"❌ 分析失败: {msg}", fg=C_RED)
+        self.card_name.configure(text=f"❌ {msg}", fg=C_RED)
 
     def _load_sectors(self):
-        """加载板块热点"""
         def do_load():
             try:
                 sectors = self.selector.get_sectors()
                 self.root.after(0, lambda: self._show_sectors(sectors))
             except Exception as e:
                 logger.error(f"加载板块失败: {e}")
-
         threading.Thread(target=do_load, daemon=True).start()
 
     def _show_sectors(self, sectors):
-        """显示板块热点"""
         for i, lbl in enumerate(self.sector_labels):
             if i < len(sectors):
                 s = sectors[i]
@@ -786,7 +880,6 @@ class StockSelectorApp:
                 lbl.configure(text="--", fg=C_FG2)
 
     def _toggle_auto(self):
-        """切换自动刷新"""
         if getattr(self, '_auto_refresh', True):
             self._auto_refresh = False
             self.auto_btn.configure(text="▶ 启动自动", bg=C_GREEN, fg="white")
@@ -796,7 +889,6 @@ class StockSelectorApp:
             self._schedule_refresh()
 
     def _schedule_refresh(self):
-        """定时刷新"""
         if getattr(self, '_auto_refresh', True):
             self.root.after(60000, self._refresh_pool)
             self.root.after(60000, self._load_sectors)
@@ -821,8 +913,6 @@ if __name__ == "__main__":
     except Exception as e:
         import traceback
         try:
-            import tkinter as tk
-            from tkinter import messagebox
             root = tk.Tk()
             root.withdraw()
             messagebox.showerror("启动错误", f"程序启动失败:\n{e}\n\n{traceback.format_exc()}")
