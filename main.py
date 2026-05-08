@@ -528,6 +528,8 @@ class StockSelectorApp:
 
     def _select_stock(self, code):
         """选中股票"""
+        # 同步输入框
+        self.code_var.set(code)
         # 清除之前选中
         for f, old_code in zip(self.pool_items, [q["code"] for q in self.pool_data]):
             bg = next((q["row_bg"] for q in self.pool_data if q["code"] == old_code), C_BG)
@@ -590,20 +592,19 @@ class StockSelectorApp:
             logger.info("=== 正在分析中，忽略重复点击")
             return  # 防止重复点击
         
-        # 输入框优先：如果用户修改了输入框，用输入框的代码
+        # 选中代码优先（点击列表触发），输入框作为手动备用
         input_code = self.code_var.get().strip()
         selected_code = getattr(self, 'selected_code', None)
-        # 如果输入框有内容且跟selected_code不同，用输入框
-        if input_code and input_code != selected_code:
+        if selected_code:
+            code = selected_code
+            logger.info(f"=== 使用选中代码(点击): {code}")
+        elif input_code:
             code = input_code
             self.selected_code = input_code  # 同步
-            logger.info(f"=== 使用输入框代码: {code}")
-        elif selected_code:
-            code = selected_code
-            logger.info(f"=== 使用选中代码: {code}")
+            logger.info(f"=== 使用输入框代码(手动): {code}")
         else:
-            code = input_code
-            logger.info(f"=== 使用输入框代码(无选中): {code}")
+            code = ""
+            logger.info(f"=== 无代码")
         
         logger.info(f"=== 准备分析股票: code={code}")
         if not code:
