@@ -26,7 +26,6 @@ logging.basicConfig(
     format=log_format,
     datefmt='%H:%M:%S',
     handlers=[
-        logging.StreamHandler(sys.stdout),
         logging.FileHandler(log_file, mode='w', encoding='utf-8')
     ]
 )
@@ -505,12 +504,12 @@ class StockSelectorApp:
                     self.pool_data.append(q)
 
                     # 绑定事件
-                    f.bind("<Button-1>", lambda e, c=code: self._select_stock(c))
-                    f.bind("<Double-Button-1>", lambda e, c=code: self._analyze_stock(c))
+                    f.bind("<Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
+                    f.bind("<Double-Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
 
                     for child in f.winfo_children():
-                        child.bind("<Button-1>", lambda e, c=code: self._select_stock(c))
-                        child.bind("<Double-Button-1>", lambda e, c=code: self._analyze_stock(c))
+                        child.bind("<Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
+                        child.bind("<Double-Button-1>", lambda e, c=code: (self._select_stock(c), self.root.after(50, self._analyze_stock, c)))
 
                     self.pool_items.append(f)
                 except Exception as e:
@@ -552,13 +551,30 @@ class StockSelectorApp:
 
         self.selected_code = code
 
+    def _on_pool_click(self, event):
+        """单击股票行 → 选中+分析"""
+        # 找到点击位置最近的 pool_item
+        cx, cy = event.x, event.y
+        for i, f in enumerate(self.pool_items):
+            if f.winfo_exists() and f.winfo_ismapped():
+                bbox = (f.winfo_x(), f.winfo_y(),
+                        f.winfo_x() + f.winfo_width(),
+                        f.winfo_y() + f.winfo_height())
+                if bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]:
+                    code = self.pool_data[i].get("code", "")
+                    if code:
+                        self._select_stock(code)
+                        self._analyze_stock(code)
+                    break
+
     def _on_pool_double_click(self, event):
-        """双击股票"""
-        region = self.pool_canvas.find_overlapping(event.x, event.y, event.x, event.y)
-        if region:
-            item_id = self.pool_canvas.gettags(region[0])[0] if self.pool_canvas.gettags(region[0]) else None
-        # 简化处理
-        pass
+        """双击 → 同上（单双击都分析）"""
+        self._on_pool_click(event)
+
+    def _select_and_analyze(self, code):
+        """选中+分析（统一入口）"""
+        self._select_stock(code)
+        self.root.after(50, self._analyze_stock, code)
 
     def _analyze_stock(self, code):
         """分析指定股票"""
