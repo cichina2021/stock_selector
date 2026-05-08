@@ -416,30 +416,49 @@ class StockSelectorApp:
         def do_refresh():
             try:
                 quotes = self.selector.get_pool_realtime()
+                logger.info(f"=== get_pool_realtime 返回 {len(quotes)} 只股票")
+                if quotes:
+                    logger.info(f"=== 第一只: {quotes[0]}")
                 self.root.after(0, lambda: self._show_pool(quotes))
             except Exception as e:
                 logger.error(f"刷新行情失败: {e}")
+                import traceback
+                logger.error(f"刷新行情异常堆栈: {traceback.format_exc()}")
+                self.root.after(0, lambda: self._show_error(f"刷新行情失败: {e}"))
                 self.root.after(0, lambda: self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL))
 
         threading.Thread(target=do_refresh, daemon=True).start()
 
     def _show_pool(self, quotes):
         """显示股票池列表"""
-        self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL)
-        self.stats_label.configure(text=f"股票池: {len(quotes)} 只  |  更新时间 {time.strftime('%H:%M:%S')}")
+        try:
+            logger.info(f"=== _show_pool 被调用, quotes数量={len(quotes) if quotes else 0}")
+            self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL)
+            self.stats_label.configure(text=f"股票池: {len(quotes)} 只  |  更新时间 {time.strftime('%H:%M:%S')}")
 
-        # 清空
-        for w in self.pool_inner.winfo_children():
-            w.destroy()
-        self.pool_items.clear()
-        self.pool_data.clear()
+            # 清空
+            for w in self.pool_inner.winfo_children():
+                w.destroy()
+            self.pool_items.clear()
+            self.pool_data.clear()
 
-        if not quotes:
-            tk.Label(self.pool_inner, text="暂无数据，请检查网络", font=FONT_MAIN, bg=C_BG, fg=C_RED).pack(pady=20)
+            if not quotes:
+                tk.Label(self.pool_inner, text="暂无数据，请检查网络", font=FONT_MAIN, bg=C_BG, fg=C_RED).pack(pady=20)
+                logger.warning("=== _show_pool: quotes为空，显示暂无数据")
+                return
+
+            logger.info(f"=== _show_pool: 开始渲染 {len(quotes)} 只股票...")
+        except Exception as e:
+            logger.error(f"=== _show_pool 初始化失败: {e}")
+            import traceback
+            logger.error(f"=== 异常堆栈: {traceback.format_exc()}")
             return
 
         # 按涨幅排序
-        quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+        try:
+            quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+        except Exception as e:
+            logger.error(f"=== 排序失败: {e}")
 
         for i, q in enumerate(quotes):
             code = q.get("code", "")
@@ -543,9 +562,21 @@ class StockSelectorApp:
             logger.info("=== 正在分析中，忽略重复点击")
             return  # 防止重复点击
         
-        code = getattr(self, 'selected_code', None)
-        if not code:
-            code = self.code_var.get().strip()
+        # 输入框优先：如果用户修改了输入框，用输入框的代码
+        input_code = self.code_var.get().strip()
+        selected_code = getattr(self, 'selected_code', None)
+        # 如果输入框有内容且跟selected_code不同，用输入框
+        if input_code and input_code != selected_code:
+            code = input_code
+            self.selected_code = input_code  # 同步
+            logger.info(f"=== 使用输入框代码: {code}")
+        elif selected_code:
+            code = selected_code
+            logger.info(f"=== 使用选中代码: {code}")
+        else:
+            code = input_code
+            logger.info(f"=== 使用输入框代码(无选中): {code}")
+        
         logger.info(f"=== 准备分析股票: code={code}")
         if not code:
             logger.info("=== 无股票代码，返回")
