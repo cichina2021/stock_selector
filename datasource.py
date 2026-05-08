@@ -74,27 +74,24 @@ class DataSource:
     #  实时行情
     # ──────────────────────────────────────────
     def get_realtime(self, codes: List[str]) -> List[Dict]:
-        """
-        获取实时行情（新浪主力 → 腾讯备用 → akshare兜底）
-
-        Args:
-            codes: 股票代码列表，如 ["600519", "002539"]
-
-        Returns:
-            [{"code", "name", "price", "change_pct", "open", "high", "low",
-              "volume", "amount", "bid1", "ask1"}, ...]
-        """
+        """获取实时行情"""
+        logger.info(f"=== DataSource.get_realtime called, codes={codes}")
         if not codes:
+            logger.info("=== 空代码列表，返回[]")
             return []
 
         cache_key = f"rt_{','.join(codes[:20])}"
         cached = _get_cache(cache_key)
         if cached is not None:
+            logger.info("=== 命中缓存")
             return cached
 
-        # ── 方法1: 新浪批量（最多重试2次）┐─
+        # ── 方法1: 新浪批量（最多重试2次）
+        logger.info("=== 尝试新浪数据源...")
         for attempt in range(2):
+            logger.info(f"=== 新浪尝试 {attempt+1}/2")
             result = self._realtime_sina(codes)
+            logger.info(f"=== 新浪结果: {len(result) if result else 0} items")
             if result:
                 _set_cache(cache_key, result)
                 return result
@@ -121,17 +118,18 @@ class DataSource:
 
     def _realtime_sina(self, codes: List[str]) -> Optional[List[Dict]]:
         """新浪财经批量实时行情"""
+        logger.info(f"=== _realtime_sina called, codes={codes}")
         try:
             self._rate_limit()
-            # 转换: "600519" → "sh600519", "002539" → "sz002539"
             symbols = [self._to_sina_symbol(c) for c in codes]
-            # 新浪最多约800个，可以一次请求全部
             batch = ",".join(symbols)
+            logger.info(f"=== 新浪请求URL: {_SINA_HQ.format(batch[:50])}...")
 
             resp = self._session.get(
                 _SINA_HQ.format(batch),
                 timeout=15
             )
+            logger.info(f"=== 新浪响应: status={resp.status_code}, len={len(resp.text)}")
             if resp.status_code != 200 or not resp.text.strip():
                 return None
 

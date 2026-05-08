@@ -526,32 +526,42 @@ class StockSelectorApp:
 
     def _analyze_selected(self):
         """分析当前选中的或输入框的股票"""
+        logger.info(f"=== _analyze_selected called, _analyzing={self._analyzing}")
         if self._analyzing:
+            logger.info("=== 正在分析中，忽略重复点击")
             return  # 防止重复点击
         
         code = getattr(self, 'selected_code', None)
         if not code:
             code = self.code_var.get().strip()
+        logger.info(f"=== 准备分析股票: code={code}")
         if not code:
+            logger.info("=== 无股票代码，返回")
             return
 
         self._analyzing = True
+        logger.info(f"=== _analyzing 设为 True")
         self.analyze_btn.configure(text="⏳ 分析中...", state=tk.DISABLED)
         self.card_name.configure(text=f"正在分析 {code}...", fg=C_FG2)
 
         def do_analyze():
+            logger.info(f"=== do_analyze 线程启动, code={code}")
             try:
+                logger.info("=== 调用 self.selector.analyze...")
                 result = self.selector.analyze(code)
+                logger.info(f"=== analyze 返回: {result.keys() if isinstance(result, dict) else '非字典'}")
                 self.root.after(0, lambda: self._show_analysis(result))
             except Exception as e:
-                logger.error(f"分析失败: {e}")
+                logger.error(f"=== 分析失败: {e}")
                 import traceback
-                traceback.print_exc()
+                logger.error(f"=== 异常堆栈: {traceback.format_exc()}")
                 self.root.after(0, lambda: self._show_error(str(e)))
             finally:
                 # 确保无论成功失败都恢复状态
+                logger.info(f"=== finally: _analyzing 设为 False")
                 self._analyzing = False
 
+        logger.info("=== 启动分析线程...")
         threading.Thread(target=do_analyze, daemon=True).start()
 
     def _show_analysis(self, result):

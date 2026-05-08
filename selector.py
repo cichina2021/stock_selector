@@ -123,13 +123,17 @@ class StockSelector:
     def analyze(self, code: str, name: str = None) -> Dict:
         """
         单股深度分析（含价位建议）
-        
-        Returns:
-            完整分析结果，包含strategies/patterns/price_advice等
         """
+        logger.info(f"=== selector.analyze called, code={code}")
+        logger.info("=== 获取K线数据...")
         df = self.data.get_kline(code, period="daily", count=300)
+        logger.info(f"=== K线数据: df={'None' if df is None else f'{len(df)} rows'}")
+        
+        logger.info("=== 获取实时行情...")
         quotes = self.data.get_realtime([code])
+        logger.info(f"=== 实时行情: quotes={len(quotes)} items")
         quote = quotes[0] if quotes else {}
+        logger.info(f"=== quote={quote}")
 
         if df is None or len(df) < 60:
             return {
