@@ -521,14 +521,20 @@ class StockSelectorApp:
         self.selected_code = code
         self._analyze_selected()
 
+    def _analyzing = False  # 防重复点击标记
+
     def _analyze_selected(self):
         """分析当前选中的或输入框的股票"""
+        if self._analyzing:
+            return  # 防止重复点击
+        
         code = getattr(self, 'selected_code', None)
         if not code:
             code = self.code_var.get().strip()
         if not code:
             return
 
+        self._analyzing = True
         self.analyze_btn.configure(text="⏳ 分析中...", state=tk.DISABLED)
         self.card_name.configure(text=f"正在分析 {code}...", fg=C_FG2)
 
@@ -538,7 +544,12 @@ class StockSelectorApp:
                 self.root.after(0, lambda: self._show_analysis(result))
             except Exception as e:
                 logger.error(f"分析失败: {e}")
+                import traceback
+                traceback.print_exc()
                 self.root.after(0, lambda: self._show_error(str(e)))
+            finally:
+                # 确保无论成功失败都恢复状态
+                self._analyzing = False
 
         threading.Thread(target=do_analyze, daemon=True).start()
 
