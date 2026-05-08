@@ -1,233 +1,445 @@
 # -*- coding: utf-8 -*-
 """
-数据源管理 v2.0
-支持多数据源降级
+数据源管理 v3.0
+- 新浪财经HTTP（主力）：实时行情 + K线
+- 腾讯HTTP（备用）：实时行情
+- 东方财富HTTP（备用）：板块数据
+- 自动降级 + 60秒缓存 + 频率限制
 """
 import requests
 import pandas as pd
 import numpy as np
-from typing import Optional, List, Dict
 import time
 import logging
+from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
+# ──────────────────────────────────────────────
+#  常量 & 全局缓存
+# ──────────────────────────────────────────────
+_SINA_HQ   = "https://hq.sinajs.cn/list={}"
+_SINA_KLINE = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+_TENCENT_HQ = "https://qt.gtimg.cn/q={}"
+_EM_QUOTE   = "https://push2.eastmoney.com/api/qt/stock/get"
+_EM_SECTOR  = "https://push2.eastmoney.com/api/qt/clist/get"
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://finance.sina.com.cn",
+}
+
+# 全局缓存（进程内）
+_CACHE: Dict[str, tuple] = {}   # key → (data, timestamp)
+_CACHE_TTL = 60                # 秒
+
+
+def _get_cache(key: str) -> Optional[any]:
+    """读取缓存"""
+    if key not in _CACHE:
+        return None
+    data, ts = _CACHE[key]
+    if time.time() - ts < _CACHE_TTL:
+        return data
+    del _CACHE[key]
+    return None
+
+
+def _set_cache(key: str, data: any):
+    """写入缓存"""
+    _CACHE[key] = (data, time.time())
+
+
+# ──────────────────────────────────────────────
+#  数据源类
+# ──────────────────────────────────────────────
 class DataSource:
     """
-    数据源管理器
-    
-    支持数据源：
-    1. 新浪财经（稳定快速）
-    2. 东方财富（备用）
+    数据源管理器 v3.0
+
+    策略：新浪主力 → 腾讯备用 → 东财备用（板块）
+    特点：
+    - 自动降级（一个失败换下一个）
+    - 60秒缓存
+    - 批量请求（减少网络开销）
     """
-    
-    # 新浪K线接口
-    SINA_KLINE = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
-    
-    # 东财实时行情接口
-    EM_QUOTE = "https://push2.eastmoney.com/api/qt/stock/get"
-    
-    # 东财板块接口
-    EM_SECTOR = "https://push2.eastmoney.com/api/qt/clist/get"
-    
+
     def __init__(self):
-        self._cache = {}
-        self._cache_time = {}
-        self._cache_ttl = 60  # 缓存60秒
-    
-    def get_kline(self, code: str, period: str = "daily", count: int = 120) -> Optional[pd.DataFrame]:
-        """
-        获取K线数据
-        
-        Args:
-            code: 股票代码（6位数字）
-            period: 周期 daily/weekly
-            count: 数据条数
-        
-        Returns:
-            DataFrame with columns: date, open, high, low, close, volume
-        """
-        cache_key = f"kline_{code}_{period}_{count}"
-        if self._is_cache_valid(cache_key):
-            return self._cache[cache_key]
-        
-        # 转换代码格式
-        if code.startswith("6"):
-            symbol = f"sh{code}"
-        else:
-            symbol = f"sz{code}"
-        
-        # 新浪接口参数
-        # scale: 240=周线, 其他=日线
-        scale = 240 if period == "weekly" else 5
-        
-        try:
-            params = {
-                "symbol": symbol,
-                "scale": scale,
-                "ma": "no",
-                "datalen": count
-            }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            }
-            
-            resp = requests.get(self.SINA_KLINE, params=params, headers=headers, timeout=10)
-            
-            if resp.status_code != 200:
-                logger.warning(f"新浪K线接口返回{resp.status_code}")
-                return None
-            
-            # 解析数据
-            data = resp.json()
-            
-            if not data or not isinstance(data, list):
-                logger.warning(f"新浪K线数据为空: {code}")
-                return None
-            
-            # 转DataFrame
-            df = pd.DataFrame(data)
-            df.columns = ["date", "open", "high", "low", "close", "volume"]
-            
-            # 转数值类型
-            for col in ["open", "high", "low", "close", "volume"]:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-            
-            # 成交额估算
-            df["amount"] = df["close"] * df["volume"]
-            
-            self._cache[cache_key] = df
-            self._cache_time[cache_key] = time.time()
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"获取K线失败 {code}: {e}")
-            return None
-    
+        self._session = requests.Session()
+        self._session.headers.update(_HEADERS)
+        # 流量控制：滑动窗口，每分钟最多60次
+        self._requests: List[float] = []
+
+    # ──────────────────────────────────────────
+    #  实时行情
+    # ──────────────────────────────────────────
     def get_realtime(self, codes: List[str]) -> List[Dict]:
         """
-        获取实时行情
-        
+        获取实时行情（新浪主力 + 腾讯备用）
+
         Args:
-            codes: 股票代码列表
-        
+            codes: 股票代码列表，如 ["600519", "002539"]
+
         Returns:
-            [{"code": "代码", "name": "名称", "price": 价格, "change_pct": 涨幅}, ...]
+            [{"code", "name", "price", "change_pct", "open", "high", "low",
+              "volume", "amount", "bid1", "ask1"}, ...]
         """
         if not codes:
             return []
-        
-        cache_key = f"realtime_{','.join(codes[:10])}"  # 只缓存前10个
-        if self._is_cache_valid(cache_key):
-            return self._cache[cache_key]
-        
-        results = []
-        
+
+        cache_key = f"rt_{','.join(codes[:20])}"
+        cached = _get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        # ── 方法1: 新浪批量 ──
+        result = self._realtime_sina(codes)
+        if result:
+            _set_cache(cache_key, result)
+            return result
+
+        # ── 方法2: 腾讯备用 ──
+        logger.warning("新浪实时行情失败，切换腾讯...")
+        result = self._realtime_tencent(codes)
+        if result:
+            _set_cache(cache_key, result)
+            return result
+
+        logger.error(f"所有实时行情接口均失败: {codes[:5]}")
+        return []
+
+    def _realtime_sina(self, codes: List[str]) -> Optional[List[Dict]]:
+        """新浪财经批量实时行情"""
         try:
-            # 东财接口
-            secids = []
-            for code in codes:
-                if code.startswith("6"):
-                    secids.append(f"1.{code}")
-                else:
-                    secids.append(f"0.{code}")
-            
-            params = {
-                "secid": ",".join(secids[:50]),  # 最多50个
-                "fields": "f12,f14,f2,f3,f4,f5,f6",
-                "ut": "fa5fd1943c747d9b1f1"
-            }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            }
-            
-            resp = requests.get(self.EM_QUOTE, params=params, headers=headers, timeout=10)
-            data = resp.json()
-            
-            if data and "data" in data:
-                diff = data["data"].get("diff", [])
-                for item in diff:
-                    results.append({
-                        "code": item.get("f12", ""),
-                        "name": item.get("f14", ""),
-                        "price": float(item.get("f2", 0) or 0),
-                        "change_pct": float(item.get("f3", 0) or 0),
-                        "volume": float(item.get("f5", 0) or 0),
-                        "amount": float(item.get("f6", 0) or 0),
-                    })
-            
-            self._cache[cache_key] = results
-            self._cache_time[cache_key] = time.time()
-            
+            self._rate_limit()
+            # 转换: "600519" → "sh600519", "002539" → "sz002539"
+            symbols = [self._to_sina_symbol(c) for c in codes]
+            # 新浪最多约800个，可以一次请求全部
+            batch = ",".join(symbols)
+
+            resp = self._session.get(
+                _SINA_HQ.format(batch),
+                timeout=15
+            )
+            if resp.status_code != 200 or not resp.text.strip():
+                return None
+
+            results = []
+            for line in resp.text.strip().split("\n"):
+                if '="' not in line:
+                    continue
+                code_part = line.split('="')[0].replace("var hq_str_", "")
+                raw = line.split('="')[1].rstrip('";\r\n ')
+                fields = raw.split(",")
+
+                if len(fields) < 32:
+                    continue
+
+                # 解析字段
+                name = fields[0]
+                pre_close = float(fields[2]) if fields[2] else 0
+                price = float(fields[3]) if fields[3] else 0
+                open_ = float(fields[1]) if fields[1] else 0
+                high = float(fields[4]) if fields[4] else 0
+                low = float(fields[5]) if fields[5] else 0
+                vol = float(fields[8]) if fields[8] else 0    # 成交量(手)
+                amount = float(fields[9]) if fields[9] else 0  # 成交额(元)
+                bid1 = float(fields[11]) if fields[11] else 0
+                ask1 = float(fields[21]) if fields[21] else 0
+
+                change_pct = ((price - pre_close) / pre_close * 100) if pre_close > 0 else 0
+
+                # 提取原始6位代码
+                code = code_part.replace("sh", "").replace("sz", "")
+
+                results.append({
+                    "code": code,
+                    "name": name,
+                    "price": price,
+                    "pre_close": pre_close,
+                    "change_pct": round(change_pct, 2),
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "volume": vol,
+                    "amount": amount,
+                    "bid1": bid1,
+                    "ask1": ask1,
+                })
+
+            return results if results else None
+
         except Exception as e:
-            logger.error(f"获取实时行情失败: {e}")
-        
-        return results
-    
+            logger.error(f"新浪实时行情异常: {e}")
+            return None
+
+    def _realtime_tencent(self, codes: List[str]) -> Optional[List[Dict]]:
+        """腾讯财经备用实时行情"""
+        try:
+            self._rate_limit()
+            symbols = [self._to_tencent_symbol(c) for c in codes]
+            batch = ",".join(symbols)
+
+            resp = self._session.get(
+                _TENCENT_HQ.format(batch),
+                timeout=15
+            )
+            if resp.status_code != 200 or not resp.text.strip():
+                return None
+
+            results = []
+            for line in resp.text.strip().split("\n"):
+                if "~" not in line:
+                    continue
+                fields = line.strip().split("~")
+                if len(fields) < 45:
+                    continue
+
+                code = fields[2]
+                name = fields[1]
+                price = float(fields[3]) if fields[3] else 0
+                pre_close = float(fields[4]) if fields[4] else 0
+                open_ = float(fields[5]) if fields[5] else 0
+                vol = float(fields[6]) if fields[6] else 0
+                high = float(fields[33]) if fields[33] else 0
+                low = fields[34] if len(fields) > 34 else "0"
+                low = float(low) if low else 0
+                amount = float(fields[37]) if fields[37] else 0
+                bid1 = float(fields[9]) if fields[9] else 0
+                ask1 = float(fields[19]) if fields[19] else 0
+
+                change_pct = ((price - pre_close) / pre_close * 100) if pre_close > 0 else 0
+
+                results.append({
+                    "code": code,
+                    "name": name,
+                    "price": price,
+                    "pre_close": pre_close,
+                    "change_pct": round(change_pct, 2),
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "volume": vol,
+                    "amount": amount,
+                    "bid1": bid1,
+                    "ask1": ask1,
+                })
+
+            return results if results else None
+
+        except Exception as e:
+            logger.error(f"腾讯实时行情异常: {e}")
+            return None
+
+    # ──────────────────────────────────────────
+    #  K线数据
+    # ──────────────────────────────────────────
+    def get_kline(self, code: str, period: str = "daily", count: int = 120) -> Optional[pd.DataFrame]:
+        """
+        获取K线数据（新浪）
+
+        Args:
+            code: 股票代码（6位）
+            period: daily / weekly / monthly
+            count: 数据条数
+
+        Returns:
+            DataFrame: date, open, high, low, close, volume, amount
+        """
+        cache_key = f"kl_{code}_{period}_{count}"
+        cached = _get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            self._rate_limit()
+            symbol = self._to_sina_symbol(code)
+
+            # scale: 5=日线, 240=周线
+            scale_map = {"daily": 5, "weekly": 240, "monthly": 5}
+            scale = scale_map.get(period, 5)
+
+            resp = self._session.get(
+                _SINA_KLINE,
+                params={
+                    "symbol": symbol,
+                    "scale": scale,
+                    "ma": "no",
+                    "datalen": count,
+                },
+                timeout=15,
+            )
+
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            if not data or not isinstance(data, list):
+                return None
+
+            df = pd.DataFrame(data)
+            df.columns = ["date", "open", "high", "low", "close", "volume"]
+
+            for col in ["open", "high", "low", "close", "volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            df = df.dropna(subset=["close"])
+            df["amount"] = (df["close"] * df["volume"]).round(2)
+
+            # 注意：新浪K线已经是时间正序（老→新），不要reverse！
+            _set_cache(cache_key, df)
+            return df
+
+        except Exception as e:
+            logger.error(f"获取K线失败 {code}: {e}")
+            return None
+
+    # ──────────────────────────────────────────
+    #  板块数据
+    # ──────────────────────────────────────────
     def get_sectors(self, sector_type: str = "industry", top_n: int = 20) -> List[Dict]:
         """
-        获取板块数据
-        
+        获取板块热点
+
         Args:
             sector_type: industry(行业) / concept(概念)
             top_n: 返回数量
         """
-        cache_key = f"sectors_{sector_type}"
-        if self._is_cache_valid(cache_key):
-            return self._cache[cache_key][:top_n]
-        
+        cache_key = f"sec_{sector_type}"
+        cached = _get_cache(cache_key)
+        if cached is not None:
+            return cached[:top_n]
+
         try:
-            # fs: m:90 t:2=行业, t:3=概念
+            self._rate_limit()
             fs = "m:90 t:2" if sector_type == "industry" else "m:90 t:3"
-            
-            params = {
-                "pn": 1,
-                "pz": 50,
-                "po": 1,
-                "np": 1,
-                "fltt": 2,
-                "invt": 2,
-                "fid": "f3",  # 按涨幅排序
-                "fs": fs,
-                "fields": "f1,f2,f3,f4,f5,f6,f7,f12,f14,f128"
-            }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            }
-            
-            resp = requests.get(self.EM_SECTOR, params=params, headers=headers, timeout=10)
+
+            resp = self._session.get(
+                _EM_SECTOR,
+                params={
+                    "pn": 1, "pz": 60, "po": 1, "np": 1,
+                    "fltt": 2, "invt": 2,
+                    "fid": "f3",
+                    "fs": fs,
+                    "fields": "f2,f3,f4,f12,f14",
+                },
+                timeout=15,
+            )
+
             data = resp.json()
-            
             sectors = []
+
             if data and "data" in data and "diff" in data["data"]:
                 for item in data["data"]["diff"]:
+                    change = float(item.get("f3", 0) or 0)
                     sectors.append({
                         "code": item.get("f12", ""),
                         "name": item.get("f14", ""),
-                        "change_pct": float(item.get("f3", 0) or 0),
-                        "lead_stock": item.get("f128", ""),
-                        "amount": float(item.get("f6", 0) or 0) / 1e8,
+                        "change_pct": round(change, 2),
                     })
-            
-            # 按涨幅排序
+
             sectors.sort(key=lambda x: x["change_pct"], reverse=True)
-            
-            self._cache[cache_key] = sectors
-            self._cache_time[cache_key] = time.time()
-            
+            _set_cache(cache_key, sectors)
             return sectors[:top_n]
-            
+
         except Exception as e:
             logger.error(f"获取板块数据失败: {e}")
             return []
-    
-    def _is_cache_valid(self, key: str) -> bool:
-        """检查缓存是否有效"""
-        if key not in self._cache_time:
-            return False
-        return (time.time() - self._cache_time[key]) < self._cache_ttl
+
+    # ──────────────────────────────────────────
+    #  热门板块个股（新增）
+    # ──────────────────────────────────────────
+    def get_hot_sector_stocks(self, top_n: int = 10, per_sector_n: int = 5) -> List[str]:
+        """
+        获取热门板块中的代表性股票代码
+
+        Args:
+            top_n: 取前n个热门板块
+            per_sector_n: 每个板块取前n只个股
+
+        Returns:
+            股票代码列表
+        """
+        cache_key = "hot_sec_stocks"
+        cached = _get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            # 同时获取行业+概念热门
+            industry = self.get_sectors("industry", top_n=top_n)
+            concept = self.get_sectors("concept", top_n=top_n)
+            all_sectors = industry + concept
+            all_sectors.sort(key=lambda x: x["change_pct"], reverse=True)
+            hot = all_sectors[:top_n]
+
+            stock_codes = []
+            # 板块代码格式: f12
+            for s in hot:
+                code = s["code"]
+                # 东财板块详情接口
+                try:
+                    resp = self._session.get(
+                        _EM_SECTOR,
+                        params={
+                            "pn": 1, "pz": per_sector_n, "po": 1, "np": 1,
+                            "fltt": 2, "invt": 2,
+                            "fid": "f3",
+                            "fs": f"b:{code}+b:+2",
+                            "fields": "f2,f3,f12,f14",
+                        },
+                        timeout=10,
+                    )
+                    data = resp.json()
+                    if data and "data" in data and "diff" in data["data"]:
+                        for item in data["data"]["diff"]:
+                            c = item.get("f12", "")
+                            if c and len(c) == 6 and c not in stock_codes:
+                                stock_codes.append(c)
+                except:
+                    pass
+
+            _set_cache(cache_key, stock_codes)
+            return stock_codes
+
+        except Exception as e:
+            logger.error(f"获取热门板块个股失败: {e}")
+            return []
+
+    # ──────────────────────────────────────────
+    #  工具方法
+    # ──────────────────────────────────────────
+    def _rate_limit(self):
+        """滑动窗口频率限制：每分钟最多60次"""
+        now = time.time()
+        # 清理超过60秒的旧请求
+        self._requests = [t for t in self._requests if now - t < 60]
+        if len(self._requests) >= 60:
+            sleep_time = 60 - (now - self._requests[0])
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+        self._requests.append(time.time())
+
+    def _to_sina_symbol(self, code: str) -> str:
+        """600519 → sh600519"""
+        code = code.strip()
+        if code.startswith("6") or code.startswith("5"):
+            return f"sh{code}"
+        return f"sz{code}"
+
+    def _to_tencent_symbol(self, code: str) -> str:
+        """600519 → sh600519"""
+        code = code.strip()
+        if code.startswith("6") or code.startswith("5"):
+            return f"sh{code}"
+        return f"sz{code}"
+
+    def get_stock_name(self, code: str) -> str:
+        """根据代码获取股票名称（从实时行情缓存）"""
+        try:
+            quotes = self.get_realtime([code])
+            if quotes:
+                return quotes[0].get("name", code)
+        except:
+            pass
+        return code

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller打包配置
-智能选股系统 v2.0
+智能选股系统 v3.0
 
 打包命令：
     pyinstaller build.spec
@@ -26,7 +26,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'tkinter',
         'matplotlib',
         'PIL',
         'scipy',
@@ -55,11 +54,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # 保留控制台，方便看日志
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以添加图标: icon='icon.ico'
+    icon=None,
 )

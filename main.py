@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-智能选股系统 v2.1 - Windows GUI版
-tkinter窗口界面，无需浏览器
+智能选股系统 v3.0 - 专业级GUI
+股票池实时监控 + 策略详细分析 + 价位建议
 
-启动方式：
-    python main.py
-
-打包Windows EXE：
-    pyinstaller build_win.spec
+功能：
+- 108只自选股实时行情监控
+- 11种选股策略详细分析（过/不过都展示原因）
+- 61种K线形态识别
+- 价位建议（支撑/阻力/买入/卖出/止损/目标）
+- 板块热点实时追踪
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -15,16 +16,11 @@ import threading
 import sys
 import os
 import logging
+import time
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger("StockSelector")
 
-# 确保工作目录
 if getattr(sys, 'frozen', False):
     WORK_DIR = os.path.dirname(sys.executable)
 else:
@@ -34,31 +30,44 @@ os.chdir(WORK_DIR)
 from selector import StockSelector
 
 
+# ═══════════════════════════════════════════════════════
+#  配色方案（专业深色Bloomberg风格）
+# ═══════════════════════════════════════════════════════
+C_BG       = "#0d1117"   # 主背景
+C_BG2      = "#161b22"   # 卡片背景
+C_BG3      = "#21262d"   # 行背景
+C_BG4      = "#2d333b"   # 悬停/选中
+C_FG       = "#e6edf3"   # 主文字
+C_FG2      = "#8b949e"   # 次要文字
+C_ACCENT   = "#58a6ff"   # 强调蓝
+C_GREEN    = "#3fb950"   # 涨/买
+C_RED      = "#f85149"   # 跌/卖
+C_YELLOW   = "#d29922"   # 警示/关注
+C_PURPLE   = "#bc8cff"   # 特殊标记
+C_BORDER   = "#30363d"   # 边框
+
+# 字体
+FONT_TITLE = ("Microsoft YaHei", 15, "bold")
+FONT_MAIN  = ("Microsoft YaHei", 10)
+FONT_BOLD  = ("Microsoft YaHei", 10, "bold")
+FONT_CODE  = ("Consolas", 10)
+FONT_SMALL = ("Microsoft YaHei", 8)
+FONT_PRICE = ("Consolas", 22, "bold")
+FONT_SCORE = ("Consolas", 28, "bold")
+
+
+# ═══════════════════════════════════════════════════════
+#  主应用
+# ═══════════════════════════════════════════════════════
 class StockSelectorApp:
-    """智能选股系统 GUI"""
-
-    # 颜色方案（深色Bloomberg风格）
-    BG = "#0a0e17"
-    BG2 = "#111927"
-    BG3 = "#1a2332"
-    FG = "#e8edf3"
-    FG2 = "#8899aa"
-    BLUE = "#3b82f6"
-    CYAN = "#06b6d4"
-    RED = "#ef4444"
-    GREEN = "#22c55e"
-    YELLOW = "#eab308"
-    ORANGE = "#f97316"
-
     def __init__(self):
         self.selector = StockSelector()
         self.root = tk.Tk()
-        self.root.title("智能选股系统 v2.1")
-        self.root.geometry("1100x750")
-        self.root.minsize(900, 600)
-        self.root.configure(bg=self.BG)
+        self.root.title("智能选股系统 v3.0")
+        self.root.geometry("1400x850")
+        self.root.minsize(1200, 700)
+        self.root.configure(bg=C_BG)
 
-        # 尝试设置DPI感知
         try:
             from ctypes import windll
             windll.shcore.SetProcessDpiAwareness(1)
@@ -66,339 +75,648 @@ class StockSelectorApp:
             pass
 
         self._build_ui()
-        self._load_sectors()
+        self._center_window()
 
+        # 定时刷新
+        self._refresh_pool()
+        self._load_sectors()
+        self._schedule_refresh()
+
+    # ───────────────────────────────────────────────
+    #  UI 布局
+    # ───────────────────────────────────────────────
     def _build_ui(self):
-        """构建界面"""
-        # 顶部搜索栏
-        top = tk.Frame(self.root, bg=self.BG2, height=56)
+        # ── 顶部工具栏 ──
+        top = tk.Frame(self.root, bg=C_BG2, height=52)
         top.pack(fill=tk.X, padx=0, pady=0)
         top.pack_propagate(False)
 
-        # Logo
-        logo = tk.Label(top, text="  📊 智能选股系统", font=("Microsoft YaHei", 14, "bold"),
-                        bg=self.BG2, fg=self.FG)
-        logo.pack(side=tk.LEFT, padx=8)
+        # Logo区
+        logo = tk.Label(top, text="📊 智能选股系统", font=FONT_TITLE, bg=C_BG2, fg=C_ACCENT)
+        logo.pack(side=tk.LEFT, padx=16, pady=0)
 
-        tk.Label(top, text="11策略 | 61形态 | 板块热点", font=("Microsoft YaHei", 9),
-                 bg=self.BG2, fg=self.FG2).pack(side=tk.LEFT, padx=4)
+        tk.Label(top, text="v3.0", font=FONT_SMALL, bg=C_BG2, fg=C_FG2).pack(side=tk.LEFT, padx=(2, 0), pady=14)
+
+        sep = tk.Frame(top, bg=C_BORDER, width=1)
+        sep.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
+
+        # 统计标签
+        self.stats_label = tk.Label(top, text="股票池: -- 只  |  加载中...", font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
+        self.stats_label.pack(side=tk.LEFT, pady=14)
+
+        sep2 = tk.Frame(top, bg=C_BORDER, width=1)
+        sep2.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=10)
+
+        # 刷新按钮
+        self.refresh_btn = tk.Button(top, text="🔄 刷新行情", font=FONT_BOLD, bg=C_ACCENT, fg="white",
+                                     relief=tk.FLAT, cursor="hand2", command=self._refresh_pool)
+        self.refresh_btn.pack(side=tk.LEFT, pady=8, ipadx=12)
+
+        self.auto_btn = tk.Button(top, text="⏸ 停止自动", font=FONT_BOLD, bg=C_YELLOW, fg="white",
+                                  relief=tk.FLAT, cursor="hand2", command=self._toggle_auto)
+        self.auto_btn.pack(side=tk.LEFT, pady=8, padx=6, ipadx=12)
 
         # 搜索框
-        search_frame = tk.Frame(top, bg=self.BG2)
-        search_frame.pack(side=tk.RIGHT, padx=16)
+        search_frame = tk.Frame(top, bg=C_BG2)
+        search_frame.pack(side=tk.RIGHT, padx=16, pady=8)
+
+        tk.Label(search_frame, text="分析股票:", font=FONT_MAIN, bg=C_BG2, fg=C_FG2).pack(side=tk.LEFT, padx=(0, 6))
 
         self.code_var = tk.StringVar()
-        self.code_entry = tk.Entry(search_frame, textvariable=self.code_var,
-                                    font=("Consolas", 12), width=14,
-                                    bg=self.BG3, fg=self.FG, insertbackground=self.FG,
-                                    relief=tk.FLAT, bd=0)
-        self.code_entry.pack(side=tk.LEFT, ipady=6, padx=(0, 8))
-        self.code_entry.insert(0, "002539")
-        self.code_entry.bind("<Return>", lambda e: self._analyze())
+        code_entry = tk.Entry(search_frame, textvariable=self.code_var, font=FONT_CODE, width=10,
+                              bg=C_BG3, fg=C_FG, insertbackground=C_FG, relief=tk.FLAT, bd=0)
+        code_entry.pack(side=tk.LEFT, ipady=5, padx=(0, 6))
+        code_entry.insert(0, "002539")
+        code_entry.bind("<Return>", lambda e: self._analyze_selected())
 
-        self.search_btn = tk.Button(search_frame, text="🔍 分析", font=("Microsoft YaHei", 10, "bold"),
-                                     bg=self.BLUE, fg="white", relief=tk.FLAT,
-                                     command=self._analyze, cursor="hand2")
-        self.search_btn.pack(side=tk.LEFT, ipady=4, ipadx=16)
+        self.analyze_btn = tk.Button(search_frame, text="🔍 分析", font=FONT_BOLD, bg=C_ACCENT, fg="white",
+                                     relief=tk.FLAT, cursor="hand2", command=self._analyze_selected)
+        self.analyze_btn.pack(side=tk.LEFT, ipadx=14, ipady=3)
 
-        # 主体区域
-        body = tk.Frame(self.root, bg=self.BG)
-        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        # ── 主体区域 (三栏) ──
+        body = tk.Frame(self.root, bg=C_BG)
+        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # 左侧：策略结果 + 板块
-        left = tk.Frame(body, bg=self.BG, width=380)
-        left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 8))
+        # 左侧：股票池列表 (35%)
+        self._build_pool_panel(body)
+        sep_v = tk.Frame(body, bg=C_BORDER, width=1)
+        sep_v.pack(side=tk.LEFT, fill=tk.Y, padx=0)
+
+        # 中间：分析详情 (65%)
+        self._build_detail_panel(body)
+
+    def _build_pool_panel(self, body):
+        """左侧：股票池实时行情列表"""
+        left = tk.Frame(body, bg=C_BG, width=480)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 6))
         left.pack_propagate(False)
 
-        # 右侧：详细分析
-        right = tk.Frame(body, bg=self.BG)
+        # 标题栏
+        hdr = tk.Frame(left, bg=C_BG2, height=36)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📋 自选股票池", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+        self.pool_sort_label = tk.Label(hdr, text="按涨幅排序", font=FONT_SMALL, bg=C_BG2, fg=C_FG2)
+        self.pool_sort_label.pack(side=tk.RIGHT, padx=12, pady=8)
+
+        # 表头
+        col_hdr = tk.Frame(left, bg=C_BG3, height=30)
+        col_hdr.pack(fill=tk.X)
+        col_hdr.pack_propagate(False)
+        headers = [("名称/代码", 0, 110), ("现价", 110, 80), ("涨跌幅", 190, 90), ("成交额(万)", 280, 100), ("评分", 380, 60)]
+        for txt, x, w in headers:
+            tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=x, y=6, width=w)
+
+        # 列表 (Canvas滚动)
+        list_frame = tk.Frame(left, bg=C_BG)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.pool_canvas = tk.Canvas(list_frame, bg=C_BG, highlightthickness=0, bd=0)
+        pool_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.pool_canvas.yview)
+        self.pool_inner = tk.Frame(self.pool_canvas, bg=C_BG)
+
+        self.pool_inner.bind("<Configure>",
+            lambda e: self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all")))
+        self.pool_canvas.create_window((0, 0), window=self.pool_inner, anchor=tk.NW)
+        self.pool_canvas.configure(yscrollcommand=pool_scroll.set)
+
+        self.pool_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        pool_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 绑定双击
+        self.pool_canvas.bind("<Double-Button-1>", self._on_pool_double_click)
+        self.pool_inner.bind("<Double-Button-1>", self._on_pool_double_click)
+
+        self.pool_items = []   # 存储行frame引用
+        self.pool_data = []    # 存储股票数据
+
+    def _build_detail_panel(self, body):
+        """右侧：分析详情"""
+        right = tk.Frame(body, bg=C_BG)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self._build_left(left)
-        self._build_right(right)
+        # ── 顶部股票信息卡 ──
+        self.info_card = tk.Frame(right, bg=C_BG2, height=90)
+        self.info_card.pack(fill=tk.X, pady=(0, 6))
+        self.info_card.pack_propagate(False)
+        self._build_info_card(self.info_card)
 
-    def _build_left(self, parent):
-        """左侧面板"""
-        # 板块热点
-        sector_label = tk.Label(parent, text="🔥 板块热点", font=("Microsoft YaHei", 11, "bold"),
-                                bg=self.BG, fg=self.FG)
-        sector_label.pack(anchor=tk.W, pady=(0, 4))
+        # ── 中部：两栏 ──
+        mid = tk.Frame(right, bg=C_BG)
+        mid.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
-        self.sector_frame = tk.Frame(parent, bg=self.BG2, bd=0)
-        self.sector_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        # 左侧：策略分析
+        left_mid = tk.Frame(mid, bg=C_BG)
+        left_mid.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # 板块列表（用Canvas+Scrollbar实现滚动）
-        self.sector_canvas = tk.Canvas(self.sector_frame, bg=self.BG2,
-                                        highlightthickness=0, bd=0)
-        sector_scroll = ttk.Scrollbar(self.sector_frame, orient=tk.VERTICAL,
-                                       command=self.sector_canvas.yview)
-        self.sector_inner = tk.Frame(self.sector_canvas, bg=self.BG2)
+        # 右侧：价位建议
+        right_mid = tk.Frame(mid, bg=C_BG, width=300)
+        right_mid.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        right_mid.pack_propagate(False)
 
-        self.sector_inner.bind("<Configure>",
-            lambda e: self.sector_canvas.configure(scrollregion=self.sector_canvas.bbox("all")))
-        self.sector_canvas.create_window((0, 0), window=self.sector_inner, anchor=tk.NW)
-        self.sector_canvas.configure(yscrollcommand=sector_scroll.set)
+        self._build_strategy_panel(left_mid)
+        self._build_price_panel(right_mid)
 
-        self.sector_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sector_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # ── 底部：板块热点 ──
+        self._build_sector_panel(right)
 
-        # 底部：策略快速查看
-        tk.Label(parent, text="📋 策略一览", font=("Microsoft YaHei", 11, "bold"),
-                 bg=self.BG, fg=self.FG).pack(anchor=tk.W, pady=(4, 4))
+    def _build_info_card(self, parent):
+        """股票信息卡片"""
+        self.card_name = tk.Label(parent, text="请从左侧股票池选择股票，或输入代码分析",
+                                   font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
+        self.card_name.place(x=16, y=10, width=400)
 
-        strategy_frame = tk.Frame(parent, bg=self.BG2, bd=0)
-        strategy_frame.pack(fill=tk.X)
+        self.card_price = tk.Label(parent, text="--", font=FONT_PRICE, bg=C_BG2, fg=C_FG)
+        self.card_price.place(x=16, y=36, width=160)
+
+        self.card_change = tk.Label(parent, text="--", font=("Consolas", 13), bg=C_BG2, fg=C_FG2)
+        self.card_change.place(x=170, y=44, width=120)
+
+        # 评分
+        score_frame = tk.Frame(parent, bg=C_BG3)
+        score_frame.place(x=560, y=14, width=200, height=62)
+
+        self.card_score = tk.Label(score_frame, text="--", font=FONT_SCORE, bg=C_BG3, fg=C_ACCENT)
+        self.card_score.place(x=0, y=0, width=80)
+        tk.Label(score_frame, text="综合评分", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=0, y=44, width=80)
+
+        self.card_suggest = tk.Label(score_frame, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
+        self.card_suggest.place(x=90, y=16, width=100)
+        tk.Label(score_frame, text="操作建议", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=90, y=44, width=100)
+
+        # 分割线
+        sep = tk.Frame(parent, bg=C_BORDER, height=1)
+        sep.place(x=0, y=82, relwidth=1)
+
+    def _build_strategy_panel(self, parent):
+        """策略分析面板"""
+        hdr = tk.Frame(parent, bg=C_BG2, height=36)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📊 策略分析结果  (✅=通过  ❌=未通过)", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+
+        # 策略列表容器
+        list_container = tk.Frame(parent, bg=C_BG)
+        list_container.pack(fill=tk.BOTH, expand=True)
+
+        # 策略字典: name -> {frame, status_label, reason_label, score_label}
+        self.strategy_widgets = {}
 
         strategies = [
-            ("放量上涨", "量价齐升"), ("均线多头", "趋势向上"),
-            ("停机坪", "强势整理"), ("回踩年线", "长期支撑"),
-            ("突破平台", "横盘突破"), ("无大幅回撤", "趋势稳健"),
-            ("海龟法则", "创新高"), ("高窄旗形", "强势形态"),
-            ("MACD金叉", "技术信号"), ("KDJ超卖", "短线机会"),
-            ("多因子", "量化评分"),
+            ("放量上涨", "量价齐升 | 成交额≥2亿 | 量比≥2"),
+            ("均线多头", "MA5>MA10>MA20>MA30 | 趋势向上"),
+            ("停机坪", "涨停后高开高走 | 强势整理"),
+            ("回踩年线", "回踩MA250缩量 | 长期支撑确认"),
+            ("突破平台", "放量突破MA60 | 横盘整理后启动"),
+            ("无大幅回撤", "60日涨<60% | 无单日跌>7%"),
+            ("海龟法则", "创N日新高 | 趋势延续"),
+            ("高窄旗形", "涨幅≥90% | 有连续涨停"),
+            ("MACD金叉", "DIF上穿DEA | MACD柱放大"),
+            ("KDJ超卖", "K/J值<20 | 反弹信号"),
+            ("多因子", "MACD+均线+量比+趋势+位置"),
         ]
 
         for i, (name, desc) in enumerate(strategies):
-            row = i // 2
-            col = i % 2
-            f = tk.Frame(strategy_frame, bg=self.BG3, bd=0)
-            f.grid(row=row, column=col, padx=2, pady=2, sticky=tk.NSEW)
-            strategy_frame.columnconfigure(col, weight=1)
+            row_bg = C_BG2 if i % 2 == 0 else C_BG
+            f = tk.Frame(list_container, bg=row_bg, height=38)
+            f.pack(fill=tk.X, padx=4, pady=1)
+            f.pack_propagate(False)
 
-            tk.Label(f, text=name, font=("Microsoft YaHei", 9, "bold"),
-                     bg=self.BG3, fg=self.CYAN).pack(anchor=tk.W, padx=6, pady=(4, 0))
-            tk.Label(f, text=desc, font=("Microsoft YaHei", 8),
-                     bg=self.BG3, fg=self.FG2).pack(anchor=tk.W, padx=6, pady=(0, 4))
+            # 状态图标
+            status = tk.Label(f, text="--", font=("Consolas", 13), bg=row_bg, fg=C_FG2, width=4, anchor=tk.CENTER)
+            status.pack(side=tk.LEFT, padx=(8, 4), pady=6)
 
-    def _build_right(self, parent):
-        """右侧面板：分析结果"""
-        # 标题
-        self.result_header = tk.Frame(parent, bg=self.BG2, bd=0)
-        self.result_header.pack(fill=tk.X, pady=(0, 8))
+            # 策略名
+            name_lbl = tk.Label(f, text=name, font=FONT_BOLD, bg=row_bg, fg=C_FG, width=10, anchor=tk.W)
+            name_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=6)
 
-        self.stock_name = tk.Label(self.result_header, text="请输入股票代码并点击分析",
-                                    font=("Microsoft YaHei", 16, "bold"),
-                                    bg=self.BG2, fg=self.FG)
-        self.stock_name.pack(anchor=tk.W, padx=16, pady=12)
+            # 原因/条件
+            reason_lbl = tk.Label(f, text=desc, font=FONT_SMALL, bg=row_bg, fg=C_FG2, anchor=tk.W)
+            reason_lbl.pack(side=tk.LEFT, padx=(0, 6), pady=6, fill=tk.X, expand=True)
 
-        # 评分条
-        self.score_frame = tk.Frame(parent, bg=self.BG2, bd=0)
-        self.score_frame.pack(fill=tk.X, pady=(0, 8))
+            # 评分
+            score_lbl = tk.Label(f, text="-", font=FONT_CODE, bg=row_bg, fg=C_FG2, width=6, anchor=tk.E)
+            score_lbl.pack(side=tk.RIGHT, padx=10, pady=6)
 
-        self.score_label = tk.Label(self.score_frame, text="",
-                                     font=("Microsoft YaHei", 28, "bold"),
-                                     bg=self.BG2, fg=self.BLUE)
-        self.score_label.pack(side=tk.LEFT, padx=16, pady=8)
+            self.strategy_widgets[name] = {
+                "frame": f,
+                "status": status,
+                "reason": reason_lbl,
+                "score": score_lbl,
+                "bg": row_bg,
+            }
 
-        self.suggestion_label = tk.Label(self.score_frame, text="",
-                                          font=("Microsoft YaHei", 14),
-                                          bg=self.BG2, fg=self.FG2)
-        self.suggestion_label.pack(side=tk.LEFT, padx=8, pady=8)
+    def _build_price_panel(self, parent):
+        """价位建议面板"""
+        hdr = tk.Frame(parent, bg=C_BG2, height=36)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="💰 价位建议", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
 
-        # 详细结果区域
-        detail_label = tk.Label(parent, text="📊 策略分析结果", font=("Microsoft YaHei", 11, "bold"),
-                                bg=self.BG, fg=self.FG)
-        detail_label.pack(anchor=tk.W, pady=(8, 4))
+        self.price_container = tk.Frame(parent, bg=C_BG)
+        self.price_container.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # 用Treeview展示策略结果
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Dark.Treeview",
-                        background=self.BG2,
-                        foreground=self.FG,
-                        fieldbackground=self.BG2,
-                        borderwidth=0,
-                        rowheight=32,
-                        font=("Microsoft YaHei", 10))
-        style.configure("Dark.Treeview.Heading",
-                        background=self.BG3,
-                        foreground=self.CYAN,
-                        borderwidth=0,
-                        font=("Microsoft YaHei", 9, "bold"))
-        style.map("Dark.Treeview",
-                  background=[("selected", self.BG3)],
-                  foreground=[("selected", self.FG)])
+        # 当前价
+        self.price_current = tk.Label(self.price_container, text="现价  --", font=("Consolas", 16, "bold"),
+                                      bg=C_BG, fg=C_FG)
+        self.price_current.pack(anchor=tk.W, pady=(0, 6))
 
-        tree_frame = tk.Frame(parent, bg=self.BG)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
+        # 支撑位
+        self.price_support = tk.Label(self.price_container, text="支撑位  --", font=FONT_MAIN,
+                                      bg=C_BG, fg=C_GREEN)
+        self.price_support.pack(anchor=tk.W, pady=2)
 
-        self.tree = ttk.Treeview(tree_frame, style="Dark.Treeview",
-                                  columns=("status", "strategy", "reason", "score"),
-                                  show="headings", height=11)
+        # 阻力位
+        self.price_resist = tk.Label(self.price_container, text="阻力位  --", font=FONT_MAIN,
+                                    bg=C_BG, fg=C_RED)
+        self.price_resist.pack(anchor=tk.W, pady=2)
 
-        self.tree.heading("status", text="状态")
-        self.tree.heading("strategy", text="策略")
-        self.tree.heading("reason", text="入选理由 / 未入选原因")
-        self.tree.heading("score", text="评分")
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
 
-        self.tree.column("status", width=50, anchor=tk.CENTER)
-        self.tree.column("strategy", width=90, anchor=tk.W)
-        self.tree.column("reason", width=380, anchor=tk.W)
-        self.tree.column("score", width=60, anchor=tk.CENTER)
+        # 买入区间
+        self.price_buy = tk.Label(self.price_container, text="建议买入区间  --", font=FONT_BOLD,
+                                  bg=C_BG, fg=C_GREEN)
+        self.price_buy.pack(anchor=tk.W, pady=2)
 
-        tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=tree_scroll.set)
+        # 卖出区间
+        self.price_sell = tk.Label(self.price_container, text="建议卖出区间  --", font=FONT_BOLD,
+                                   bg=C_BG, fg=C_RED)
+        self.price_sell.pack(anchor=tk.W, pady=2)
 
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # 止损位
+        self.price_stop = tk.Label(self.price_container, text="止损价  --", font=FONT_MAIN,
+                                   bg=C_BG, fg=C_YELLOW)
+        self.price_stop.pack(anchor=tk.W, pady=2)
 
-        # 形态识别结果
-        pattern_label = tk.Label(parent, text="🎯 K线形态识别", font=("Microsoft YaHei", 11, "bold"),
-                                 bg=self.BG, fg=self.FG)
-        pattern_label.pack(anchor=tk.W, pady=(12, 4))
+        # 目标价
+        self.price_target = tk.Label(self.price_container, text="目标价  --", font=FONT_MAIN,
+                                     bg=C_BG, fg=C_ACCENT)
+        self.price_target.pack(anchor=tk.W, pady=2)
 
-        self.pattern_text = tk.Text(parent, height=4, font=("Microsoft YaHei", 10),
-                                     bg=self.BG2, fg=self.FG, relief=tk.FLAT, bd=0,
-                                     wrap=tk.WORD, state=tk.DISABLED)
-        self.pattern_text.pack(fill=tk.X)
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
 
-        # 总结
-        self.summary_label = tk.Label(parent, text="", font=("Microsoft YaHei", 11),
-                                       bg=self.BG, fg=self.FG2, wraplength=600, justify=tk.LEFT)
-        self.summary_label.pack(anchor=tk.W, pady=(12, 0))
+        # 风险收益比
+        self.price_ratio = tk.Label(self.price_container, text="风险收益比  --", font=FONT_MAIN,
+                                    bg=C_BG, fg=C_FG2)
+        self.price_ratio.pack(anchor=tk.W, pady=2)
 
-    def _analyze(self):
-        """分析股票"""
-        code = self.code_var.get().strip()
+        # 价位理由
+        self.price_reason = tk.Label(self.price_container, text="", font=FONT_SMALL,
+                                    bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
+        self.price_reason.pack(anchor=tk.W, pady=4)
+
+        # K线形态
+        tk.Frame(self.price_container, bg=C_BORDER, height=1).pack(fill=tk.X, pady=6)
+        tk.Label(self.price_container, text="🎯 K线形态", font=FONT_BOLD, bg=C_BG, fg=C_ACCENT).pack(anchor=tk.W, pady=2)
+        self.price_patterns = tk.Label(self.price_container, text="暂无形态", font=FONT_SMALL,
+                                       bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
+        self.price_patterns.pack(anchor=tk.W, pady=2)
+
+    def _build_sector_panel(self, parent):
+        """底部板块热点"""
+        bottom = tk.Frame(parent, bg=C_BG2, height=90)
+        bottom.pack(fill=tk.X, pady=(6, 0))
+        bottom.pack_propagate(False)
+
+        tk.Label(bottom, text="🔥 板块热点", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).place(x=12, y=8)
+
+        # 板块容器
+        self.sector_container = tk.Frame(bottom, bg=C_BG2)
+        self.sector_container.place(x=12, y=32, relwidth=1, relheight=1)
+        self.sector_labels = []
+
+        # 预设20个标签槽位
+        for i in range(20):
+            lbl = tk.Label(self.sector_container, text="--", font=FONT_SMALL, bg=C_BG3, fg=C_FG,
+                           padx=8, pady=2, relief=tk.FLAT)
+            lbl.pack(side=tk.LEFT, padx=2, pady=2)
+            self.sector_labels.append(lbl)
+
+    # ───────────────────────────────────────────────
+    #  事件 & 业务逻辑
+    # ───────────────────────────────────────────────
+    def _refresh_pool(self):
+        """刷新股票池实时行情"""
+        self.refresh_btn.configure(text="⏳ 刷新中...", state=tk.DISABLED)
+        self.stats_label.configure(text="股票池: --  |  正在加载行情...")
+
+        def do_refresh():
+            try:
+                quotes = self.selector.get_pool_realtime()
+                self.root.after(0, lambda: self._show_pool(quotes))
+            except Exception as e:
+                logger.error(f"刷新行情失败: {e}")
+                self.root.after(0, lambda: self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL))
+
+        threading.Thread(target=do_refresh, daemon=True).start()
+
+    def _show_pool(self, quotes):
+        """显示股票池列表"""
+        self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL)
+        self.stats_label.configure(text=f"股票池: {len(quotes)} 只  |  更新时间 {time.strftime('%H:%M:%S')}")
+
+        # 清空
+        for w in self.pool_inner.winfo_children():
+            w.destroy()
+        self.pool_items.clear()
+        self.pool_data.clear()
+
+        if not quotes:
+            tk.Label(self.pool_inner, text="暂无数据，请检查网络", font=FONT_MAIN, bg=C_BG, fg=C_RED).pack(pady=20)
+            return
+
+        # 按涨幅排序
+        quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+
+        for i, q in enumerate(quotes):
+            code = q.get("code", "")
+            name = q.get("name", code)
+            price = q.get("price", 0)
+            change = q.get("change_pct", 0)
+            amount = q.get("amount", 0)  # 元
+            amount_w = amount / 1e4 if amount else 0
+
+            row_bg = C_BG3 if i % 2 == 0 else C_BG
+            f = tk.Frame(self.pool_inner, bg=row_bg, height=32, cursor="hand2")
+            f.pack(fill=tk.X, padx=0, pady=0)
+            f.pack_propagate(False)
+
+            # 名称+代码
+            name_color = C_GREEN if change >= 0 else C_RED
+            tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
+                     width=8, anchor=tk.W).place(x=8, y=6)
+            tk.Label(f, text=f"{code}", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                     width=8, anchor=tk.W).place(x=8, y=20)
+
+            # 现价
+            price_color = C_GREEN if change >= 0 else C_RED
+            price_str = f"{price:.2f}" if price else "--"
+            tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
+                     width=9, anchor=tk.E).place(x=108, y=8)
+
+            # 涨跌幅
+            change_str = f"{change:+.2f}%" if change else "--"
+            change_color = C_GREEN if change >= 0 else C_RED
+            tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=change_color,
+                     width=10, anchor=tk.E).place(x=192, y=8)
+
+            # 成交额(万)
+            amount_str = f"{amount_w:.0f}" if amount_w else "--"
+            tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                     width=11, anchor=tk.E).place(x=280, y=8)
+
+            # 评分占位（待分析）
+            tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                     width=8, anchor=tk.E).place(x=378, y=8)
+
+            # 保存数据
+            q["row_bg"] = row_bg
+            self.pool_data.append(q)
+
+            # 绑定事件
+            f.bind("<Button-1>", lambda e, code=code: self._select_stock(code))
+            f.bind("<Double-Button-1>", lambda e, code=code: self._analyze_stock(code))
+
+            for child in f.winfo_children():
+                child.bind("<Button-1>", lambda e, code=code: self._select_stock(code))
+                child.bind("<Double-Button-1>", lambda e, code=code: self._analyze_stock(code))
+
+            self.pool_items.append(f)
+
+    def _select_stock(self, code):
+        """选中股票"""
+        # 清除之前选中
+        for f, old_code in zip(self.pool_items, [q["code"] for q in self.pool_data]):
+            bg = next((q["row_bg"] for q in self.pool_data if q["code"] == old_code), C_BG)
+            f.configure(bg=bg)
+            for child in f.winfo_children():
+                try:
+                    child.configure(bg=bg)
+                except:
+                    pass
+
+        # 标记选中
+        idx = next((i for i, q in enumerate(self.pool_data) if q["code"] == code), -1)
+        if idx >= 0:
+            f = self.pool_items[idx]
+            f.configure(bg=C_BG4)
+            for child in f.winfo_children():
+                try:
+                    child.configure(bg=C_BG4)
+                except:
+                    pass
+
+        self.selected_code = code
+
+    def _on_pool_double_click(self, event):
+        """双击股票"""
+        region = self.pool_canvas.find_overlapping(event.x, event.y, event.x, event.y)
+        if region:
+            item_id = self.pool_canvas.gettags(region[0])[0] if self.pool_canvas.gettags(region[0]) else None
+        # 简化处理
+        pass
+
+    def _analyze_stock(self, code):
+        """分析指定股票"""
+        self.selected_code = code
+        self._analyze_selected()
+
+    def _analyze_selected(self):
+        """分析当前选中的或输入框的股票"""
+        code = getattr(self, 'selected_code', None)
+        if not code:
+            code = self.code_var.get().strip()
         if not code:
             return
 
-        self.search_btn.configure(text="⏳ 分析中...", state=tk.DISABLED)
-        self.stock_name.configure(text=f"正在分析 {code}...")
+        self.analyze_btn.configure(text="⏳ 分析中...", state=tk.DISABLED)
+        self.card_name.configure(text=f"正在分析 {code}...", fg=C_FG2)
 
-        # 后台线程执行分析
         def do_analyze():
             try:
                 result = self.selector.analyze(code)
-                self.root.after(0, lambda: self._show_result(result))
+                self.root.after(0, lambda: self._show_analysis(result))
             except Exception as e:
+                logger.error(f"分析失败: {e}")
                 self.root.after(0, lambda: self._show_error(str(e)))
 
         threading.Thread(target=do_analyze, daemon=True).start()
 
-    def _show_result(self, result):
+    def _show_analysis(self, result):
         """显示分析结果"""
-        self.search_btn.configure(text="🔍 分析", state=tk.NORMAL)
+        self.analyze_btn.configure(text="🔍 分析", state=tk.NORMAL)
 
         if "error" in result:
             self._show_error(result["error"])
             return
 
-        # 更新标题
         name = result.get("name", result["code"])
         price = result.get("price", 0)
         change = result.get("change_pct", 0)
         change_str = f"+{change:.2f}%" if change >= 0 else f"{change:.2f}%"
-        change_color = self.RED if change >= 0 else self.GREEN
+        price_color = C_GREEN if change >= 0 else C_RED
 
-        self.stock_name.configure(text=f"{name}  {result['code']}")
+        # 信息卡
+        self.card_name.configure(text=f"{name}  ({result['code']})", font=FONT_TITLE, fg=C_FG)
+        self.card_price.configure(text=f"¥{price:.2f}" if price else "¥--", fg=price_color)
+        self.card_change.configure(text=change_str, fg=price_color)
 
-        # 评分
         score = result.get("total_score", 0)
-        score_color = self.RED if score >= 75 else (self.YELLOW if score >= 50 else self.FG2)
-        self.score_label.configure(text=f"{score}分", fg=score_color)
+        if score >= 75:
+            score_color = C_GREEN
+        elif score >= 50:
+            score_color = C_YELLOW
+        else:
+            score_color = C_FG2
+        self.card_score.configure(text=f"{score}", fg=score_color)
 
-        suggestion = result.get("suggestion", "")
-        sug_color = self.RED if "买入" in suggestion else (self.YELLOW if "关注" in suggestion else self.FG2)
-        self.suggestion_label.configure(text=f"建议: {suggestion}", fg=sug_color)
+        sug = result.get("suggestion", "")
+        if "买入" in sug:
+            sug_color = C_GREEN
+        elif "关注" in sug:
+            sug_color = C_YELLOW
+        else:
+            sug_color = C_FG2
+        self.card_suggest.configure(text=sug, fg=sug_color)
 
-        # 策略结果
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        # 更新策略列表
+        for name_s, s_info in self.strategy_widgets.items():
+            s_info["status"].configure(text="--", fg=C_FG2)
+            s_info["reason"].configure(text="未分析", fg=C_FG2)
+            s_info["score"].configure(text="-", fg=C_FG2)
+            s_info["frame"].configure(bg=s_info["bg"])
+            for child in s_info["frame"].winfo_children():
+                try:
+                    child.configure(bg=s_info["bg"])
+                except:
+                    pass
 
         for s in result.get("strategies", []):
-            name, matched, reason, score_val = s
-            status = "✅" if matched else "❌"
-            score_str = f"{score_val}" if matched else "-"
-            tags = ("matched",) if matched else ("unmatched",)
-            self.tree.insert("", tk.END, values=(status, name, reason, score_str), tags=tags)
+            sname, matched, reason, score_val = s
+            if sname in self.strategy_widgets:
+                w = self.strategy_widgets[sname]
+                if matched:
+                    w["status"].configure(text="✅", fg=C_GREEN)
+                    w["reason"].configure(text=reason, fg=C_GREEN)
+                    w["score"].configure(text=f"{score_val}", fg=C_GREEN)
+                    w["frame"].configure(bg="#0d2117")
+                    for child in w["frame"].winfo_children():
+                        try:
+                            child.configure(bg="#0d2117")
+                        except:
+                            pass
+                else:
+                    w["status"].configure(text="❌", fg=C_RED)
+                    w["reason"].configure(text=reason, fg=C_FG2)
+                    w["score"].configure(text="-", fg=C_FG2)
 
-        self.tree.tag_configure("matched", foreground=self.GREEN)
-        self.tree.tag_configure("unmatched", foreground=self.FG2)
+        # 价位建议
+        self.price_current.configure(text=f"现价  ¥{price:.2f}" if price else "现价  --")
 
-        # 形态识别
-        self.pattern_text.configure(state=tk.NORMAL)
-        self.pattern_text.delete("1.0", tk.END)
+        sup_levels = result.get("support_levels", [])
+        if sup_levels:
+            self.price_support.configure(text=f"支撑位  {' / '.join([f'{s:.2f}' for s in sup_levels])}")
+        else:
+            self.price_support.configure(text="支撑位  --")
 
+        res_levels = result.get("resistance_levels", [])
+        if res_levels:
+            self.price_resist.configure(text=f"阻力位  {' / '.join([f'{r:.2f}' for r in res_levels])}")
+        else:
+            self.price_resist.configure(text="阻力位  --")
+
+        buy_zone = result.get("buy_zone", {})
+        if buy_zone and buy_zone.get("low"):
+            self.price_buy.configure(text=f"建议买入区间  ¥{buy_zone['low']:.2f} ~ ¥{buy_zone['high']:.2f}")
+        else:
+            self.price_buy.configure(text="建议买入区间  --")
+
+        sell_zone = result.get("sell_zone", {})
+        if sell_zone and sell_zone.get("low"):
+            self.price_sell.configure(text=f"建议卖出区间  ¥{sell_zone['low']:.2f} ~ ¥{sell_zone['high']:.2f}")
+        else:
+            self.price_sell.configure(text="建议卖出区间  --")
+
+        stop = result.get("stop_loss", 0)
+        self.price_stop.configure(text=f"止损价  ¥{stop:.2f}" if stop else "止损价  --")
+
+        target = result.get("target_price", 0)
+        self.price_target.configure(text=f"目标价  ¥{target:.2f}" if target else "目标价  --")
+
+        ratio = result.get("risk_reward_ratio", 0)
+        if ratio:
+            ratio_color = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
+            self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=ratio_color)
+        else:
+            self.price_ratio.configure(text="风险收益比  --")
+
+        # 形态
         patterns = result.get("patterns", [])
         if patterns:
-            for p in patterns:
-                signal = "🟢" if p["signal"] == 1 else ("🔴" if p["signal"] == -1 else "⚪")
-                self.pattern_text.insert(tk.END, f"{signal} {p['name']}: {p['detail']}  ")
+            p_text = "  ".join([
+                ("🟢" if p["signal"] == 1 else ("🔴" if p["signal"] == -1 else "⚪")) + p["name"]
+                for p in patterns[:6]
+            ])
+            self.price_patterns.configure(text=p_text, fg=C_FG)
         else:
-            self.pattern_text.insert(tk.END, "暂无明确形态信号")
+            self.price_patterns.configure(text="暂无明确形态", fg=C_FG2)
 
-        self.pattern_text.configure(state=tk.DISABLED)
-
-        # 总结
-        self.summary_label.configure(text=result.get("summary", ""))
+        # 选中该股票在列表中的行
+        self._select_stock(result["code"])
 
     def _show_error(self, msg):
         """显示错误"""
-        self.search_btn.configure(text="🔍 分析", state=tk.NORMAL)
-        self.stock_name.configure(text=f"❌ 分析失败: {msg}")
-        self.score_label.configure(text="")
-        self.suggestion_label.configure(text="")
+        self.analyze_btn.configure(text="🔍 分析", state=tk.NORMAL)
+        self.card_name.configure(text=f"❌ 分析失败: {msg}", fg=C_RED)
 
     def _load_sectors(self):
         """加载板块热点"""
         def do_load():
             try:
-                industry = self.selector.data.get_sectors("industry", top_n=10)
-                concept = self.selector.data.get_sectors("concept", top_n=10)
-                all_sectors = (industry + concept)
-                all_sectors.sort(key=lambda x: x["change_pct"], reverse=True)
-                self.root.after(0, lambda: self._show_sectors(all_sectors[:20]))
+                sectors = self.selector.get_sectors()
+                self.root.after(0, lambda: self._show_sectors(sectors))
             except Exception as e:
                 logger.error(f"加载板块失败: {e}")
 
         threading.Thread(target=do_load, daemon=True).start()
 
     def _show_sectors(self, sectors):
-        """显示板块列表"""
-        # 清空
-        for w in self.sector_inner.winfo_children():
-            w.destroy()
+        """显示板块热点"""
+        for i, lbl in enumerate(self.sector_labels):
+            if i < len(sectors):
+                s = sectors[i]
+                change = s.get("change_pct", 0)
+                color = C_GREEN if change >= 0 else C_RED
+                lbl.configure(text=f"{s['name']} {change:+.1f}%", fg=color)
+            else:
+                lbl.configure(text="--", fg=C_FG2)
 
-        if not sectors:
-            tk.Label(self.sector_inner, text="暂无数据", font=("Microsoft YaHei", 10),
-                     bg=self.BG2, fg=self.FG2).pack(pady=20)
-            return
+    def _toggle_auto(self):
+        """切换自动刷新"""
+        if getattr(self, '_auto_refresh', True):
+            self._auto_refresh = False
+            self.auto_btn.configure(text="▶ 启动自动", bg=C_GREEN, fg="white")
+        else:
+            self._auto_refresh = True
+            self.auto_btn.configure(text="⏸ 停止自动", bg=C_YELLOW, fg="white")
+            self._schedule_refresh()
 
-        for i, s in enumerate(sectors):
-            row = tk.Frame(self.sector_inner, bg=self.BG3 if i % 2 == 0 else self.BG2, bd=0)
-            row.pack(fill=tk.X, padx=4, pady=1)
+    def _schedule_refresh(self):
+        """定时刷新"""
+        if getattr(self, '_auto_refresh', True):
+            self.root.after(60000, self._refresh_pool)
+            self.root.after(60000, self._load_sectors)
+            self.root.after(60000, self._schedule_refresh)
 
-            name_text = s["name"]
-            if len(name_text) > 8:
-                name_text = name_text[:8] + ".."
-
-            tk.Label(row, text=f" {name_text}", font=("Microsoft YaHei", 9),
-                     bg=row["bg"], fg=self.FG, width=10, anchor=tk.W).pack(side=tk.LEFT, padx=2)
-
-            change = s["change_pct"]
-            color = self.RED if change >= 0 else self.GREEN
-            tk.Label(row, text=f"{change:+.2f}%", font=("Consolas", 9, "bold"),
-                     bg=row["bg"], fg=color, width=8, anchor=tk.E).pack(side=tk.RIGHT, padx=4)
-
-            lead = s.get("lead_stock", "--")
-            if lead and len(lead) > 6:
-                lead = lead[:6]
-            tk.Label(row, text=lead, font=("Microsoft YaHei", 8),
-                     bg=row["bg"], fg=self.FG2, width=8, anchor=tk.E).pack(side=tk.RIGHT, padx=2)
-
-    def run(self):
-        """启动应用"""
-        # 窗口居中
+    def _center_window(self):
         self.root.update_idletasks()
         w = self.root.winfo_width()
         h = self.root.winfo_height()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        x = (sw - w) // 2
-        y = (sh - h) // 2
-        self.root.geometry(f"+{x}+{y}")
+        self.root.geometry(f"+{(sw - w)//2}+{(sh - h)//2}")
 
+    def run(self):
         self.root.mainloop()
 
 
