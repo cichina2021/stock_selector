@@ -62,6 +62,7 @@ FONT_SCORE = ("Consolas", 28, "bold")
 class StockSelectorApp:
     def __init__(self):
         self.selector = StockSelector()
+        self._analyzing = False  # 防重复点击
         self.root = tk.Tk()
         self.root.title("智能选股系统 v3.0")
         self.root.geometry("1400x850")
@@ -521,7 +522,7 @@ class StockSelectorApp:
         self.selected_code = code
         self._analyze_selected()
 
-    def _analyzing = False  # 防重复点击标记
+    # 防重复点击标记（在__init__中初始化）
 
     def _analyze_selected(self):
         """分析当前选中的或输入框的股票"""
