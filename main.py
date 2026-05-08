@@ -190,7 +190,9 @@ class StockSelectorApp:
 
         self.pool_inner.bind("<Configure>",
             lambda e: self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all")))
-        self.pool_canvas.create_window((0, 0), window=self.pool_inner, anchor=tk.NW)
+        self.pool_canvas.create_window((0, 0), window=self.pool_inner, anchor=tk.NW, width=self.pool_canvas.winfo_width())
+        self.pool_canvas.bind("<Configure>",
+            lambda e: self.pool_canvas.itemconfig(1, width=e.width))
         self.pool_canvas.configure(yscrollcommand=pool_scroll.set)
 
         self.pool_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

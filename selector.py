@@ -145,7 +145,13 @@ class StockSelector:
         stock_name = name or self.pool_names.get(code, quote.get("name", code))
 
         # 策略分析
+        logger.info(f"=== K线df: {len(df)}行, columns={list(df.columns)}")
+        logger.info(f"=== K线最后5行:\n{df.tail(5).to_string()}")
+        logger.info(f"=== 开始执行11个策略...")
         strategy_result = self.strategies.comprehensive_select(df, quote)
+        for sname, smatched, sreason, sscore in strategy_result["strategies"]:
+            logger.info(f"   策略[{sname}]: {'✅' if smatched else '❌'} | {sreason} | 评分{sscore}")
+        logger.info(f"=== 策略结果: 通过{strategy_result['matched_count']}/11, 均分{strategy_result['total_score']}")
 
         # 形态识别
         pattern_result = self.patterns.get_latest_patterns(df, n=10)
