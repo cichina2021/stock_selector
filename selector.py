@@ -36,10 +36,49 @@ class StockSelector:
         self.pool_names = {}
         self._load_stock_pool()
 
+    # ════════════════════════════════════════
+    #  内置股票池（108只，打包后无需外部文件）
+    # ════════════════════════════════════════
+    BUILTIN_POOL = {
+        "600016": "民生银行", "600032": "浙江新能", "600039": "四川路桥", "600292": "电投水电",
+        "600332": "白云山", "600353": "旭光电子", "600392": "盛和资源", "600410": "华胜天成",
+        "600444": "国机通用", "600468": "百利电气", "600478": "科力远", "600487": "亨通光电",
+        "600498": "烽火通信", "600506": "统一股份", "600522": "中天科技", "600550": "保变电气",
+        "600577": "精达股份", "600601": "方正科技", "600602": "云赛智联", "600673": "东阳光",
+        "600690": "海尔智家", "600789": "鲁抗医药", "600810": "神马股份", "600859": "王府井",
+        "600877": "电科芯片", "600993": "马应龙", "601086": "国芳集团", "601099": "太平洋",
+        "601108": "财通证券", "601138": "工业富联", "601162": "天风证券", "601606": "长城军工",
+        "601669": "中国电建", "601800": "中国交建", "601901": "方正证券", "601933": "永辉超市",
+        "603072": "天和磁材", "603118": "共进股份", "603131": "上海沪工", "603212": "赛伍技术",
+        "603220": "中贝通信", "603359": "东珠生态", "603636": "南威软件", "603686": "福龙马",
+        "603712": "七一二", "603788": "宁波高发", "603928": "兴业股份", "605033": "美邦股份",
+        "000002": "万科A", "000025": "特力A", "000063": "中兴通讯", "000158": "常山北明",
+        "000333": "美的集团", "000410": "沈阳机床", "000555": "神州信息", "000561": "烽火电子",
+        "000564": "供销大集", "000625": "长安汽车", "000670": "盈方微", "000682": "东方电子",
+        "000859": "国风新材", "000880": "潍柴重机", "000901": "航天科技", "000905": "厦门港务",
+        "000936": "华西股份", "001287": "中电港", "002015": "协鑫能科", "002074": "国轩高科",
+        "002083": "孚日股份", "002094": "青岛金王", "002104": "恒宝股份", "002117": "东港股份",
+        "002124": "天邦食品", "002130": "沃尔核材", "002131": "利欧股份", "002165": "红宝丽",
+        "002173": "创新医疗", "002184": "海得控制", "002185": "华天科技", "002189": "中光学",
+        "002209": "达意隆", "002212": "天融信", "002241": "歌尔股份", "002261": "拓维信息",
+        "002265": "建设工业", "002276": "万马股份", "002278": "神开股份", "002279": "久其软件",
+        "002366": "融发核电", "002369": "卓翼科技", "002415": "海康威视", "002465": "海格通信",
+        "002472": "双环传动", "002474": "榕基软件", "002510": "天汽模", "002512": "ST达华",
+        "002520": "日发精机", "002539": "云图控股", "002594": "比亚迪", "002611": "东方精工",
+        "002639": "雪人集团", "002729": "好利科技", "002730": "电光科技", "002861": "瀛通通讯",
+        "002927": "泰永长征", "002946": "新乳业", "003015": "日久光电", "159525": "红利低波ETF富国",
+    }
+
     def _load_stock_pool(self):
-        """加载自选股票池"""
+        """加载自选股票池（内置优先 → 外部文件覆盖）"""
         import os
 
+        # 1. 先加载内置股票池
+        self.pool_codes = list(self.BUILTIN_POOL.keys())
+        self.pool_names = dict(self.BUILTIN_POOL)
+        logger.info(f"内置股票池: {len(self.pool_codes)}只")
+
+        # 2. 尝试从外部文件追加（开发环境用）
         pool_files = [
             os.path.expanduser("~/.qclaw/workspace/stock_pool.md"),
             "/Volumes/macos/stock_analysis/自选股详细分析/原始数据/实时行情_20260412_1039.csv",
@@ -48,7 +87,6 @@ class StockSelector:
         for pf in pool_files:
             if not os.path.exists(pf):
                 continue
-
             try:
                 if pf.endswith(".csv"):
                     import csv
@@ -57,44 +95,30 @@ class StockSelector:
                         for row in reader:
                             code = row.get("代码", "").strip()
                             name = row.get("名称", "").strip()
-                            if code and len(code) == 6:
+                            if code and len(code) == 6 and code not in self.pool_names:
                                 self.pool_codes.append(code)
                                 self.pool_names[code] = name
                 else:
-                    # markdown格式: "| 600016 | 民生银行 |"
                     with open(pf, "r", encoding="utf-8") as f:
                         for line in f:
                             stripped = line.strip()
-                            # 跳过：空行/标题行/分隔线行
                             if not stripped or stripped.startswith("#") or stripped.startswith(">"):
                                 continue
-                            # 表头和分隔线
                             if "代码" in stripped or "---" in stripped:
                                 continue
-                            # 数据行: "| 600016 | 民生银行 |"
                             parts = [p.strip() for p in stripped.split("|")]
                             code_parts = [p for p in parts if p and len(p) == 6 and p.isdigit()]
                             if code_parts:
                                 code = code_parts[0]
-                                name_idx = parts.index(code) + 1
-                                name = parts[name_idx].strip() if name_idx < len(parts) else code
-                                self.pool_codes.append(code)
-                                self.pool_names[code] = name
-
-                logger.info(f"从{pf}加载了{len(self.pool_codes)}只股票")
-                break  # 找到一个就停
-
+                                if code not in self.pool_names:
+                                    name_idx = parts.index(code) + 1
+                                    name = parts[name_idx].strip() if name_idx < len(parts) else code
+                                    self.pool_codes.append(code)
+                                    self.pool_names[code] = name
+                    logger.info(f"从{pf}追加了股票")
+                    break
             except Exception as e:
-                logger.warning(f"加载股票池失败 {pf}: {e}")
-
-        # 去重
-        seen = set()
-        unique_codes = []
-        for c in self.pool_codes:
-            if c not in seen:
-                seen.add(c)
-                unique_codes.append(c)
-        self.pool_codes = unique_codes
+                logger.warning(f"加载外部股票池失败 {pf}: {e}")
 
     def analyze(self, code: str, name: str = None) -> Dict:
         """

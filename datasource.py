@@ -75,7 +75,7 @@ class DataSource:
     # ──────────────────────────────────────────
     def get_realtime(self, codes: List[str]) -> List[Dict]:
         """
-        获取实时行情（新浪主力 + 腾讯备用）
+        获取实时行情（新浪主力 → 腾讯备用 → akshare兜底）
 
         Args:
             codes: 股票代码列表，如 ["600519", "002539"]
@@ -92,15 +92,26 @@ class DataSource:
         if cached is not None:
             return cached
 
-        # ── 方法1: 新浪批量 ──
-        result = self._realtime_sina(codes)
-        if result:
-            _set_cache(cache_key, result)
-            return result
+        # ── 方法1: 新浪批量（最多重试2次）┐─
+        for attempt in range(2):
+            result = self._realtime_sina(codes)
+            if result:
+                _set_cache(cache_key, result)
+                return result
+            if attempt < 1:
+                logger.warning(f"新浪实时行情第{attempt+1}次失败，重试...")
+                time.sleep(0.5)
 
         # ── 方法2: 腾讯备用 ──
         logger.warning("新浪实时行情失败，切换腾讯...")
         result = self._realtime_tencent(codes)
+        if result:
+            _set_cache(cache_key, result)
+            return result
+
+        # ── 方法3: akshare兜底 ──
+        logger.warning("腾讯也失败，尝试akshare...")
+        result = self._realtime_akshare(codes)
         if result:
             _set_cache(cache_key, result)
             return result
@@ -173,6 +184,45 @@ class DataSource:
             logger.error(f"新浪实时行情异常: {e}")
             return None
 
+    def _realtime_akshare(self, codes: List[str]) -> Optional[List[Dict]]:
+        """akshare兜底实时行情（备用中的备用）"""
+        try:
+            import akshare as ak
+            self._rate_limit()
+
+            results = []
+            # akshare需要逐个或小批量获取
+            for code in codes:
+                try:
+                    symbol = f"{code}" if code.startswith("6") else f"{code}"
+                    df = ak.stock_zh_a_spot_em()
+                    row = df[df['代码'] == code]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        results.append({
+                            "code": code,
+                            "name": r.get("名称", code),
+                            "price": float(r.get("最新价", 0) or 0),
+                            "pre_close": float(r.get("昨收", 0) or 0),
+                            "change_pct": round(float(r.get("涨跌幅", 0) or 0), 2),
+                            "open": float(r.get("今开", 0) or 0),
+                            "high": float(r.get("最高", 0) or 0),
+                            "low": float(r.get("最低", 0) or 0),
+                            "volume": float(r.get("成交量", 0) or 0),
+                            "amount": float(r.get("成交额", 0) or 0),
+                            "bid1": float(r.get("买一价", 0) or 0),
+                            "ask1": float(r.get("卖一价", 0) or 0),
+                        })
+                except:
+                    continue
+            return results if results else None
+        except ImportError:
+            logger.debug("akshare未安装，跳过")
+            return None
+        except Exception as e:
+            logger.error(f"akshare实时行情异常: {e}")
+            return None
+
     def _realtime_tencent(self, codes: List[str]) -> Optional[List[Dict]]:
         """腾讯财经备用实时行情"""
         try:
@@ -236,7 +286,7 @@ class DataSource:
     # ──────────────────────────────────────────
     def get_kline(self, code: str, period: str = "daily", count: int = 120) -> Optional[pd.DataFrame]:
         """
-        获取K线数据（新浪）
+        获取K线数据（新浪 → akshare备用）
 
         Args:
             code: 股票代码（6位）
@@ -251,11 +301,31 @@ class DataSource:
         if cached is not None:
             return cached
 
+        # ── 方法1: 新浪（重试2次）┐─
+        for attempt in range(2):
+            df = self._kline_sina(code, period, count)
+            if df is not None:
+                _set_cache(cache_key, df)
+                return df
+            if attempt < 1:
+                time.sleep(0.5)
+
+        # ── 方法2: akshare备用 ──
+        logger.warning(f"新浪K线失败，尝试akshare {code}")
+        df = self._kline_akshare(code, period, count)
+        if df is not None:
+            _set_cache(cache_key, df)
+            return df
+
+        logger.error(f"获取K线失败 {code}: 所有数据源均失败")
+        return None
+
+    def _kline_sina(self, code: str, period: str = "daily", count: int = 120) -> Optional[pd.DataFrame]:
+        """新浪K线"""
         try:
             self._rate_limit()
             symbol = self._to_sina_symbol(code)
 
-            # scale: 5=日线, 240=周线
             scale_map = {"daily": 5, "weekly": 240, "monthly": 5}
             scale = scale_map.get(period, 5)
 
@@ -267,10 +337,11 @@ class DataSource:
                     "ma": "no",
                     "datalen": count,
                 },
-                timeout=15,
+                timeout=20,
             )
 
             if resp.status_code != 200:
+                logger.warning(f"新浪K线HTTP {resp.status_code}: {code}")
                 return None
 
             data = resp.json()
@@ -285,13 +356,49 @@ class DataSource:
 
             df = df.dropna(subset=["close"])
             df["amount"] = (df["close"] * df["volume"]).round(2)
-
-            # 注意：新浪K线已经是时间正序（老→新），不要reverse！
-            _set_cache(cache_key, df)
             return df
 
         except Exception as e:
-            logger.error(f"获取K线失败 {code}: {e}")
+            logger.error(f"新浪K线异常 {code}: {e}")
+            return None
+
+    def _kline_akshare(self, code: str, period: str = "daily", count: int = 120) -> Optional[pd.DataFrame]:
+        """akshare K线备用"""
+        try:
+            import akshare as ak
+            self._rate_limit()
+
+            # akshare个股历史行情
+            symbol = f"{code}" if code.startswith("6") else f"{code}"
+            period_map = {"daily": "daily", "weekly": "weekly", "monthly": "monthly"}
+            ak_period = period_map.get(period, "daily")
+
+            df = ak.stock_zh_a_hist(symbol=code, period=ak_period, adjust="qfq")
+            if df is None or len(df) < 10:
+                return None
+
+            # 统一列名
+            rename_map = {
+                "日期": "date", "开盘": "open", "收盘": "close",
+                "最高": "high", "最低": "low", "成交量": "volume",
+                "成交额": "amount",
+            }
+            df = df.rename(columns=rename_map)
+            keep_cols = [c for c in ["date","open","high","low","close","volume","amount"] if c in df.columns]
+            df = df[keep_cols].tail(count)
+
+            for col in ["open","high","low","close","volume"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            df = df.dropna(subset=["close"])
+            return df
+
+        except ImportError:
+            logger.debug("akshare未安装")
+            return None
+        except Exception as e:
+            logger.error(f"akshare K线异常 {code}: {e}")
             return None
 
     # ──────────────────────────────────────────
