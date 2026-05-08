@@ -18,8 +18,20 @@ import os
 import logging
 import time
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
+# 配置日志（控制台+文件）
+log_format = '%(asctime)s [%(levelname)s] %(message)s'
+log_file = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), 'debug.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format=log_format,
+    datefmt='%H:%M:%S',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    ]
+)
 logger = logging.getLogger("StockSelector")
+logger.info(f"日志文件: {log_file}")
 
 if getattr(sys, 'frozen', False):
     WORK_DIR = os.path.dirname(sys.executable)
