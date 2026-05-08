@@ -447,73 +447,83 @@ class StockSelectorApp:
                 logger.warning("=== _show_pool: quotes为空，显示暂无数据")
                 return
 
+            # 按涨幅排序
+            try:
+                quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+            except Exception as e:
+                logger.error(f"=== 排序失败: {e}")
+
             logger.info(f"=== _show_pool: 开始渲染 {len(quotes)} 只股票...")
+
+            # ── 渲染每一行 ──
+            for i, q in enumerate(quotes):
+                try:
+                    code = q.get("code", "")
+                    name = q.get("name", code) or code
+                    price = q.get("price", 0) or 0
+                    change = q.get("change_pct", 0) or 0
+                    amount = q.get("amount", 0) or 0  # 元
+                    amount_w = amount / 1e4 if amount else 0
+
+                    row_bg = C_BG3 if i % 2 == 0 else C_BG
+                    f = tk.Frame(self.pool_inner, bg=row_bg, height=32, cursor="hand2")
+                    f.pack(fill=tk.X, padx=0, pady=0)
+                    f.pack_propagate(False)
+
+                    # 名称+代码
+                    name_color = C_GREEN if change >= 0 else C_RED
+                    tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
+                             width=8, anchor=tk.W).place(x=8, y=6)
+                    tk.Label(f, text=f"{code}", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                             width=8, anchor=tk.W).place(x=8, y=20)
+
+                    # 现价
+                    price_color = C_GREEN if change >= 0 else C_RED
+                    price_str = f"{price:.2f}" if price else "--"
+                    tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
+                             width=9, anchor=tk.E).place(x=108, y=8)
+
+                    # 涨跌幅
+                    change_str = f"{change:+.2f}%" if change else "--"
+                    change_color = C_GREEN if change >= 0 else C_RED
+                    tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=change_color,
+                             width=10, anchor=tk.E).place(x=192, y=8)
+
+                    # 成交额(万)
+                    amount_str = f"{amount_w:.0f}" if amount_w else "--"
+                    tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                             width=11, anchor=tk.E).place(x=280, y=8)
+
+                    # 评分占位（待分析）
+                    tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                             width=8, anchor=tk.E).place(x=378, y=8)
+
+                    # 保存数据
+                    q["row_bg"] = row_bg
+                    self.pool_data.append(q)
+
+                    # 绑定事件
+                    f.bind("<Button-1>", lambda e, c=code: self._select_stock(c))
+                    f.bind("<Double-Button-1>", lambda e, c=code: self._analyze_stock(c))
+
+                    for child in f.winfo_children():
+                        child.bind("<Button-1>", lambda e, c=code: self._select_stock(c))
+                        child.bind("<Double-Button-1>", lambda e, c=code: self._analyze_stock(c))
+
+                    self.pool_items.append(f)
+                except Exception as e:
+                    logger.error(f"=== 渲染第{i}行({q.get('code','?')})失败: {e}")
+                    continue
+
+            # 强制更新Canvas滚动区域
+            self.pool_inner.update_idletasks()
+            self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all"))
+            logger.info(f"=== _show_pool 渲染完成: {len(self.pool_items)} 行, canvas bbox={self.pool_canvas.bbox('all')}")
+
         except Exception as e:
-            logger.error(f"=== _show_pool 初始化失败: {e}")
+            logger.error(f"=== _show_pool 失败: {e}")
             import traceback
             logger.error(f"=== 异常堆栈: {traceback.format_exc()}")
-            return
-
-        # 按涨幅排序
-        try:
-            quotes.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
-        except Exception as e:
-            logger.error(f"=== 排序失败: {e}")
-
-        for i, q in enumerate(quotes):
-            code = q.get("code", "")
-            name = q.get("name", code)
-            price = q.get("price", 0)
-            change = q.get("change_pct", 0)
-            amount = q.get("amount", 0)  # 元
-            amount_w = amount / 1e4 if amount else 0
-
-            row_bg = C_BG3 if i % 2 == 0 else C_BG
-            f = tk.Frame(self.pool_inner, bg=row_bg, height=32, cursor="hand2")
-            f.pack(fill=tk.X, padx=0, pady=0)
-            f.pack_propagate(False)
-
-            # 名称+代码
-            name_color = C_GREEN if change >= 0 else C_RED
-            tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
-                     width=8, anchor=tk.W).place(x=8, y=6)
-            tk.Label(f, text=f"{code}", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                     width=8, anchor=tk.W).place(x=8, y=20)
-
-            # 现价
-            price_color = C_GREEN if change >= 0 else C_RED
-            price_str = f"{price:.2f}" if price else "--"
-            tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
-                     width=9, anchor=tk.E).place(x=108, y=8)
-
-            # 涨跌幅
-            change_str = f"{change:+.2f}%" if change else "--"
-            change_color = C_GREEN if change >= 0 else C_RED
-            tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=change_color,
-                     width=10, anchor=tk.E).place(x=192, y=8)
-
-            # 成交额(万)
-            amount_str = f"{amount_w:.0f}" if amount_w else "--"
-            tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                     width=11, anchor=tk.E).place(x=280, y=8)
-
-            # 评分占位（待分析）
-            tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                     width=8, anchor=tk.E).place(x=378, y=8)
-
-            # 保存数据
-            q["row_bg"] = row_bg
-            self.pool_data.append(q)
-
-            # 绑定事件
-            f.bind("<Button-1>", lambda e, code=code: self._select_stock(code))
-            f.bind("<Double-Button-1>", lambda e, code=code: self._analyze_stock(code))
-
-            for child in f.winfo_children():
-                child.bind("<Button-1>", lambda e, code=code: self._select_stock(code))
-                child.bind("<Double-Button-1>", lambda e, code=code: self._analyze_stock(code))
-
-            self.pool_items.append(f)
 
     def _select_stock(self, code):
         """选中股票"""
