@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-智能选股引擎 v3.0
-整合策略、形态识别、价位建议
+智能选股引擎 v5.0 - 金策智算融合版
+嫁接门下省风控 + 100分评分卡 + 策略组合模式
 """
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import logging
 
 from strategies import ClassicStrategies
 from patterns import PatternRecognition
 from datasource import DataSource
 from price_advisor import PriceAdvisor
+from risk_guard import RiskGuard
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class StockSelector:
         self.patterns = PatternRecognition()
         self.data = DataSource()
         self.price = PriceAdvisor()
+        self.risk = RiskGuard()  # 门下省风控引擎
 
         # 加载股票池
         self.pool_codes = []
@@ -159,17 +161,32 @@ class StockSelector:
         # 价位建议
         price_result = self.price.analyze(df, quote)
 
-        # 综合评分（策略+形态）
-        base_score = strategy_result["total_score"]
-        pattern_bonus = sum(5 if p["signal"] == 1 else (-5 if p["signal"] == -1 else 0) for p in pattern_result)
-        total_score = max(0, min(100, base_score + pattern_bonus))
+        # ══════════════════════════════════════════════════════
+        #  100分评分卡（四维度）- 借鉴金策智算礼部评分体系
+        # ══════════════════════════════════════════════════════
+        score_card = self._build_score_card(
+            strategy_result, pattern_result, price_result, quote
+        )
 
-        # 操作建议（结合价位）
-        if total_score >= 75 and price_result["risk_reward_ratio"] >= 2:
+        # 风控评估（门下省审核）
+        risk_signal = {
+            "code": code,
+            "direction": "BUY" if score_card["grade"] in ["S", "A"] else "HOLD",
+            "price": quote.get("price", 0),
+            "stop_loss": price_result.get("stop_loss", 0),
+            "risk_reward_ratio": price_result.get("risk_reward_ratio", 0),
+        }
+        risk_result = self.risk.evaluate(risk_signal, [], 0.0)
+
+        # 风控扣分
+        total_score = max(0, score_card["total_score"] - risk_result["score_penalty"])
+
+        # 操作建议（结合评分+风控）
+        if risk_result["approved"] and score_card["grade"] in ["S", "A"]:
             suggestion = "强烈买入"
-        elif total_score >= 60 and price_result["risk_reward_ratio"] >= 1.5:
+        elif risk_result["approved"] and score_card["grade"] == "B":
             suggestion = "逢低买入"
-        elif total_score >= 45:
+        elif score_card["grade"] == "C":
             suggestion = "关注"
         else:
             suggestion = "观望"
@@ -203,11 +220,163 @@ class StockSelector:
             "amount": quote.get("amount", 0),
             "strategies": strategy_result["strategies"],
             "patterns": pattern_result,
+            # 评分卡
             "total_score": round(total_score, 1),
+            "grade": score_card["grade"],
+            "score_card": score_card,
             "matched_count": strategy_result["matched_count"],
             "suggestion": suggestion,
             "summary": summary,
+            # 风控结果
+            "risk_approved": risk_result["approved"],
+            "risk_warnings": risk_result["warnings"],
+            "risk_rejected_by": risk_result["rejected_by"],
             **price_result,
+        }
+
+    def _build_score_card(
+        self,
+        strategy_result: Dict,
+        pattern_result: List[Dict],
+        price_result: Dict,
+        quote: Dict,
+    ) -> Dict:
+        """
+        构建四维度评分卡（借鉴金策智算礼部）
+        
+        维度权重：
+        - 盈利能力 30分：策略通过数、平均评分
+        - 风险控制 35分：回撤幅度、波动率、止损位合理性
+        - 盈亏质量 20分：风险收益比、胜率估计
+        - 实战可行性 15分：信号一致性、成交额、换手率
+        
+        Returns:
+            {
+                "profit_score": float,
+                "risk_score": float,
+                "quality_score": float,
+                "practical_score": float,
+                "total_score": float,
+                "grade": "S"|"A"|"B"|"C"|"D",
+                "grade_color": str,
+            }
+        """
+        # ── 1. 盈利能力（30分）──────────────────────
+        matched = strategy_result.get("matched_count", 0)
+        avg_strategy_score = strategy_result.get("total_score", 0)
+        
+        profit_score = 0
+        # 通过策略数（最多15分）
+        profit_score += min(15, matched * 3)
+        # 平均策略评分（最多15分）
+        profit_score += min(15, avg_strategy_score * 0.15)
+        
+        # ── 2. 风险控制（35分）──────────────────────
+        risk_score = 35  # 默认满分，逐步扣分
+        
+        # 止损位合理性（最多扣15分）
+        stop_loss = price_result.get("stop_loss", 0)
+        current_price = quote.get("price", 0) or 0
+        if stop_loss > 0 and current_price > 0:
+            stop_loss_pct = (current_price - stop_loss) / current_price * 100
+            if stop_loss_pct > 15:  # 止损太宽
+                risk_score -= min(15, (stop_loss_pct - 10) * 1.5)
+            elif stop_loss_pct > 10:
+                risk_score -= 5
+        else:
+            risk_score -= 10  # 无止损数据
+        
+        # 回撤检查（最多扣10分）
+        # 检查是否有"无大幅回撤"策略通过
+        no_drawdown_passed = any(
+            s[0] == "无大幅回撤" and s[1]
+            for s in strategy_result.get("strategies", [])
+        )
+        if not no_drawdown_passed:
+            risk_score -= 10
+        
+        # 波动率检查（最多扣10分）
+        # 通过MACD/KDJ判断
+        has_macd = any(s[0] == "MACD金叉" and s[1] for s in strategy_result.get("strategies", []))
+        if not has_macd:
+            risk_score -= 5
+        
+        risk_score = max(0, risk_score)
+        
+        # ── 3. 盈亏质量（20分）──────────────────────
+        quality_score = 0
+        rr_ratio = price_result.get("risk_reward_ratio", 0)
+        
+        # 风险收益比（最多15分）
+        if rr_ratio >= 3:
+            quality_score += 15
+        elif rr_ratio >= 2:
+            quality_score += 12
+        elif rr_ratio >= 1.5:
+            quality_score += 8
+        elif rr_ratio >= 1:
+            quality_score += 4
+        
+        # 形态信号一致性（5分）
+        bullish_patterns = sum(1 for p in pattern_result if p.get("signal") == 1)
+        bearish_patterns = sum(1 for p in pattern_result if p.get("signal") == -1)
+        if bullish_patterns > bearish_patterns * 2:
+            quality_score += 5
+        elif bullish_patterns > bearish_patterns:
+            quality_score += 3
+        
+        # ── 4. 实战可行性（15分）──────────────────────
+        practical_score = 0
+        
+        # 成交额（8分）
+        amount = quote.get("amount", 0) or 0
+        if amount >= 5e8:  # 5亿以上
+            practical_score += 8
+        elif amount >= 2e8:  # 2-5亿
+            practical_score += 6
+        elif amount >= 1e8:  # 1-2亿
+            practical_score += 4
+        else:
+            practical_score += 2
+        
+        # 策略共识度（7分）
+        if matched >= 5:
+            practical_score += 7
+        elif matched >= 3:
+            practical_score += 5
+        elif matched >= 2:
+            practical_score += 3
+        else:
+            practical_score += 1
+        
+        # ── 综合评分 ──────────────────────────────
+        total = profit_score + risk_score + quality_score + practical_score
+        
+        # 等级判定
+        if total >= 90:
+            grade = "S"
+            grade_color = "#10b981"  # emerald
+        elif total >= 75:
+            grade = "A"
+            grade_color = "#3b82f6"  # blue
+        elif total >= 60:
+            grade = "B"
+            grade_color = "#f59e0b"  # amber
+        elif total >= 45:
+            grade = "C"
+            grade_color = "#64748b"  # slate
+        else:
+            grade = "D"
+            grade_color = "#f43f5e"  # rose
+        
+        return {
+            "profit_score": round(profit_score, 1),
+            "risk_score": round(risk_score, 1),
+            "quality_score": round(quality_score, 1),
+            "practical_score": round(practical_score, 1),
+            "total_score": round(total, 1),
+            "grade": grade,
+            "grade_color": grade_color,
         }
 
     def scan_pool(self, top_n: int = 30) -> List[Dict]:

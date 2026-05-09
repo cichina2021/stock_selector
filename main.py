@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-智能选股系统 v4.0 - 一键全扫专业版
-启动自动扫描全部股票 → 评分排序展示 → 点击查看详情
+智能选股系统 v5.0 - 金策智算融合版
+嫁接门下省风控 + 100分评分卡 + 三省六部UI风格
 
 功能：
-- 启动后自动全量扫描108只自选股（后台线程）
-- 股票池列表直接显示综合评分，按评分排序
-- 11种策略 + 61种K线形态 + 价位建议
-- 板块热点实时追踪
+- 门下省风控：5条铁律一票否决
+- 礼部评分卡：四维度100分制 S/A/B/C/D 评级
+- 中书省策略：11策略 + 61形态 + 价位建议
+- 实时全扫：一键扫描108只自选股
+- 事件日志：实时显示分析过程
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -16,6 +17,7 @@ import sys
 import os
 import logging
 import time
+from typing import List
 
 # 配置日志（只写文件）
 log_format = '%(asctime)s [%(levelname)s] %(message)s'
@@ -41,30 +43,41 @@ from selector import StockSelector
 
 
 # ═══════════════════════════════════════════════════════
-#  配色方案（专业深色Bloomberg风格）
+#  配色方案（借鉴金策智算 Slate900/Blue风格）
 # ═══════════════════════════════════════════════════════
-C_BG       = "#0d1117"
-C_BG2      = "#161b22"
-C_BG3      = "#21262d"
-C_BG4      = "#2d333b"
-C_FG       = "#e6edf3"
-C_FG2      = "#8b949e"
-C_ACCENT   = "#58a6ff"
-C_GREEN    = "#3fb950"
-C_RED      = "#f85149"
-C_YELLOW   = "#d29922"
-C_PURPLE   = "#bc8cff"
-C_BORDER   = "#30363d"
+# 主背景（Slate-900系列）
+C_BG       = "#0b1120"   # 最深底色
+C_BG2      = "#0f172a"   # 卡片背景
+C_BG3      = "#1e293b"   # 悬浮背景
+C_BG4      = "#334155"   # 高亮背景
 
-# 字体
+# 前景
+C_FG       = "#e2e8f0"   # 主文字
+C_FG2      = "#94a3b8"   # 次要文字
+
+# 强调色（Blue-500/Emerald-500/Rose-500）
+C_ACCENT   = "#3b82f6"   # 蓝色强调
+C_GREEN    = "#10b981"   # 翡翠绿（盈利）
+C_RED      = "#f43f5e"   # 玫瑰红（亏损）
+C_YELLOW   = "#f59e0b"   # 琥珀黄（警告）
+C_PURPLE   = "#a855f7"   # 紫色
+C_CYAN     = "#06b6d4"   # 青色
+
+# 边框
+C_BORDER   = "#334155"   # Slate-700
+C_GLOW    = "#2563eb"   # 发光蓝
+
+# 字体（等宽字体用于数据，UI字体用于标签）
 FONT_TITLE  = ("Microsoft YaHei", 14, "bold")
 FONT_MAIN   = ("Microsoft YaHei", 10)
 FONT_BOLD   = ("Microsoft YaHei", 10, "bold")
 FONT_CODE   = ("Consolas", 10)
 FONT_SMALL  = ("Microsoft YaHei", 8)
 FONT_PRICE  = ("Consolas", 20, "bold")
-FONT_SCORE  = ("Consolas", 24, "bold")
+FONT_SCORE  = ("Consolas", 28, "bold")
+FONT_GRADE  = ("Arial Black", 36, "bold")
 FONT_SCAN   = ("Microsoft YaHei", 12, "bold")
+FONT_EVENT  = ("Consolas", 9)
 
 
 # ═══════════════════════════════════════════════════════
@@ -78,10 +91,14 @@ class StockSelectorApp:
         self.scan_results = {}          # code -> result dict
         self.scan_progress = (0, 0)     # (当前, 总数)
         self.root = tk.Tk()
-        self.root.title("智能选股系统 v4.0")
-        self.root.geometry("1440x900")
-        self.root.minsize(1280, 720)
+        self.root.title("智能选股系统 v5.0 - 金策智算融合版")
+        self.root.geometry("1600x950")
+        self.root.minsize(1440, 800)
         self.root.configure(bg=C_BG)
+        
+        # 事件日志（实时分析过程）
+        self.event_log: List[str] = []
+        self._log_event("系统启动", "v5.0 金策智算融合版")
 
         try:
             from ctypes import windll
@@ -151,8 +168,9 @@ class StockSelectorApp:
         self._build_pool_panel(body)
         tk.Frame(body, bg=C_BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # 右侧：分析详情
+        # 右侧：分析详情 + 事件日志
         self._build_detail_panel(body)
+        self._build_event_log_panel(body)
 
     def _build_pool_panel(self, body):
         """左侧：股票池列表（名称+代码+现价+涨跌幅+成交额+评分）"""
@@ -237,7 +255,7 @@ class StockSelectorApp:
         self._build_sector_panel(right)
 
     def _build_info_card(self, parent):
-        """顶部信息卡"""
+        """顶部信息卡 - 四维度评分卡"""
         self.card_name = tk.Label(parent, text="👈 请从左侧选择股票查看详情",
                                    font=FONT_MAIN, bg=C_BG2, fg=C_FG2)
         self.card_name.place(x=16, y=8, width=420)
@@ -248,21 +266,35 @@ class StockSelectorApp:
         self.card_change = tk.Label(parent, text="--", font=("Consolas", 13), bg=C_BG2, fg=C_FG2)
         self.card_change.place(x=160, y=42, width=110)
 
-        # 评分区
-        score_bg = tk.Frame(parent, bg=C_BG3)
-        score_bg.place(x=520, y=12, width=180, height=64)
-
-        self.card_score = tk.Label(score_bg, text="--", font=FONT_SCORE, bg=C_BG3, fg=C_ACCENT)
-        self.card_score.place(x=0, y=0, width=75)
-        tk.Label(score_bg, text="综合评分", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=0, y=44, width=75)
-
+        # ── 四维度评分卡（借鉴金策礼部）──────────────────
+        score_bg = tk.Frame(parent, bg=C_BG3, highlightthickness=1, highlightbackground=C_BORDER)
+        score_bg.place(x=360, y=8, width=440, height=68)
+        
+        # 等级（S/A/B/C/D）
+        self.card_grade = tk.Label(score_bg, text="-", font=FONT_GRADE, bg=C_BG3, fg=C_FG2)
+        self.card_grade.place(x=12, y=8, width=80, height=50)
+        tk.Label(score_bg, text="评级", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=30, y=50)
+        
+        # 四维度分数
+        dim_x = 100
+        self.card_profit = tk.Label(score_bg, text="盈利 --", font=FONT_SMALL, bg=C_BG3, fg=C_GREEN)
+        self.card_profit.place(x=dim_x, y=12, width=85)
+        self.card_risk = tk.Label(score_bg, text="风控 --", font=FONT_SMALL, bg=C_BG3, fg=C_RED)
+        self.card_risk.place(x=dim_x+90, y=12, width=85)
+        self.card_quality = tk.Label(score_bg, text="质量 --", font=FONT_SMALL, bg=C_BG3, fg=C_CYAN)
+        self.card_quality.place(x=dim_x, y=32, width=85)
+        self.card_practical = tk.Label(score_bg, text="实战 --", font=FONT_SMALL, bg=C_BG3, fg=C_YELLOW)
+        self.card_practical.place(x=dim_x+90, y=32, width=85)
+        
+        # 总分
+        self.card_score = tk.Label(score_bg, text="总分 --", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT)
+        self.card_score.place(x=280, y=18, width=80)
+        
+        # 操作建议
         self.card_suggest = tk.Label(score_bg, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
-        self.card_suggest.place(x=82, y=18, width=90)
-        tk.Label(score_bg, text="操作建议", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=82, y=44, width=90)
-
-        # 匹配数
+        self.card_suggest.place(x=360, y=18, width=70)
         self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
-        self.card_matched.place(x=82, y=38, width=90)
+        self.card_matched.place(x=360, y=38, width=70)
 
         tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=80, relwidth=1)
 
@@ -388,6 +420,7 @@ class StockSelectorApp:
         self.scan_results.clear()
         self.scan_btn.configure(text="⏳ 扫描中...", state=tk.DISABLED, bg=C_YELLOW)
         self.progress_label.configure(text="🔄 开始全量扫描 108 只股票...")
+        self._log_event("系统", "开始全量扫描")
 
         codes = list(self.selector.pool_codes)
         total = len(codes)
@@ -403,8 +436,13 @@ class StockSelectorApp:
                     if "error" not in result:
                         self.scan_results[code] = result
                         ok_count += 1
+                        # 记录分析结果
+                        grade = result.get("grade", "-")
+                        score = result.get("total_score", 0)
+                        self._log_event(code, f"{grade}级 {score:.0f}分")
                     else:
                         fail_count += 1
+                        self._log_event(code, f"失败: {result['error'][:20]}")
 
                     # 更新进度UI
                     pct = (i + 1) * 100 // total
@@ -442,6 +480,9 @@ class StockSelectorApp:
         self.progress_label.configure(
             text=f"✅ 全量扫描完成! 成功{ok_count}只 | 失败{fail_count}只 | 按评分排序显示"
         )
+        
+        # 记录扫描完成事件
+        self._log_event("系统", f"扫描完成 成功{ok_count} 失败{fail_count}")
 
         # 用扫描结果重新渲染股票池列表（带评分！）
         self._show_pool_with_scores()
@@ -754,24 +795,42 @@ class StockSelectorApp:
             return
 
         name = result.get("name", result["code"])
+        code = result["code"]
         price = result.get("price", 0)
         change = result.get("change_pct", 0)
         change_str = f"+{change:.2f}%" if change >= 0 else f"{change:.2f}%"
         price_color = C_GREEN if change >= 0 else C_RED
 
         # 信息卡
-        self.card_name.configure(text=f"{name}  ({result['code']})", font=FONT_TITLE, fg=C_FG)
+        self.card_name.configure(text=f"{name}  ({code})", font=FONT_TITLE, fg=C_FG)
         self.card_price.configure(text=f"¥{price:.2f}" if price else "¥--", fg=price_color)
         self.card_change.configure(text=change_str, fg=price_color)
 
-        score = result.get("total_score", 0)
-        if score >= 75:
+        # ── 四维度评分卡 ────────────────────────────────
+        score_card = result.get("score_card", {})
+        grade = result.get("grade", "-")
+        grade_color = score_card.get("grade_color", C_FG2)
+        
+        self.card_grade.configure(text=grade, fg=grade_color)
+        
+        profit_sc = score_card.get("profit_score", 0)
+        risk_sc = score_card.get("risk_score", 0)
+        quality_sc = score_card.get("quality_score", 0)
+        practical_sc = score_card.get("practical_score", 0)
+        
+        self.card_profit.configure(text=f"盈利 {profit_sc:.0f}", fg=C_GREEN if profit_sc >= 15 else (C_YELLOW if profit_sc >= 8 else C_RED))
+        self.card_risk.configure(text=f"风控 {risk_sc:.0f}", fg=C_GREEN if risk_sc >= 25 else (C_YELLOW if risk_sc >= 15 else C_RED))
+        self.card_quality.configure(text=f"质量 {quality_sc:.0f}", fg=C_GREEN if quality_sc >= 15 else (C_YELLOW if quality_sc >= 8 else C_FG2))
+        self.card_practical.configure(text=f"实战 {practical_sc:.0f}", fg=C_GREEN if practical_sc >= 10 else (C_YELLOW if practical_sc >= 6 else C_FG2))
+        
+        total_score = result.get("total_score", 0)
+        if total_score >= 75:
             score_color = C_GREEN
-        elif score >= 50:
+        elif total_score >= 50:
             score_color = C_YELLOW
         else:
             score_color = C_FG2
-        self.card_score.configure(text=f"{score}", fg=score_color)
+        self.card_score.configure(text=f"总分 {total_score:.0f}", fg=score_color)
 
         sug = result.get("suggestion", "")
         if "买入" in sug:
@@ -783,7 +842,10 @@ class StockSelectorApp:
         self.card_suggest.configure(text=sug, fg=sug_color)
 
         matched = result.get("matched_count", 0)
-        self.card_matched.configure(text=f"通过{matched}/11策略")
+        self.card_matched.configure(text=f"通过{matched}/11")
+        
+        # 记录事件日志
+        self._log_event(code, f"分析完成 {grade}级 总分{total_score:.0f} {sug}")
 
         # 策略列表
         for sname_s, s_info in self.strategy_widgets.items():
@@ -855,6 +917,21 @@ class StockSelectorApp:
         else:
             self.price_patterns.configure(text="暂无明确形态", fg=C_FG2)
 
+        # ── 风控状态显示 ──────────────────────────────
+        risk_approved = result.get("risk_approved", True)
+        risk_warnings = result.get("risk_warnings", [])
+        risk_rejected = result.get("risk_rejected_by", [])
+        
+        if risk_approved:
+            self.risk_indicator.configure(text="● 正常", fg=C_GREEN)
+        else:
+            self.risk_indicator.configure(text="● 风险", fg=C_RED)
+            self._log_event(result["code"], f"风控拒绝: {risk_rejected[0] if risk_rejected else '未知原因'}")
+        
+        if risk_warnings:
+            for w in risk_warnings[:3]:
+                self._log_event(result["code"], f"警告: {w}")
+
         self._select_stock(result["code"])
 
     def _show_error(self, msg):
@@ -878,6 +955,69 @@ class StockSelectorApp:
                 lbl.configure(text=f"{s['name']} {change:+.1f}%", fg=color)
             else:
                 lbl.configure(text="--", fg=C_FG2)
+
+    def _log_event(self, code: str, message: str):
+        """记录事件到日志面板"""
+        import time
+        ts = time.strftime("%H:%M:%S")
+        entry = f"[{ts}] {code} {message}"
+        self.event_log.insert(0, entry)
+        self.event_log = self.event_log[:50]  # 保留最近50条
+        if hasattr(self, 'event_listbox'):
+            self.root.after(0, self._update_event_display)
+
+    def _update_event_display(self):
+        """更新事件日志显示"""
+        if hasattr(self, 'event_listbox'):
+            self.event_listbox.delete(0, tk.END)
+            for entry in self.event_log:
+                self.event_listbox.insert(tk.END, entry)
+            # 高亮最新条目
+            if self.event_log:
+                self.event_listbox.see(0)
+
+    def _build_event_log_panel(self, body):
+        """右侧：事件日志面板（三省六部风格）"""
+        # 事件日志面板（最右侧窄条）
+        log_panel = tk.Frame(body, bg=C_BG2, width=200)
+        log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        log_panel.pack_propagate(False)
+
+        # 标题
+        hdr = tk.Frame(log_panel, bg=C_BG3, height=34)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📜 事件日志", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+
+        # 风控状态指示灯
+        risk_status = tk.Frame(log_panel, bg=C_BG3, height=40)
+        risk_status.pack(fill=tk.X)
+        risk_status.pack_propagate(False)
+        
+        self.risk_indicator = tk.Label(risk_status, text="● 正常", font=FONT_BOLD, bg=C_BG3, fg=C_GREEN)
+        self.risk_indicator.pack(pady=8)
+        
+        # 事件列表
+        list_frame = tk.Frame(log_panel, bg=C_BG)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
+        self.event_listbox = tk.Listbox(
+            list_frame,
+            font=FONT_EVENT,
+            bg=C_BG,
+            fg=C_FG2,
+            selectbackground=C_BG4,
+            selectforeground=C_FG,
+            highlightthickness=0,
+            bd=0,
+            activestyle='none'
+        )
+        self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 滚动条
+        log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.event_listbox.configure(yscrollcommand=log_scroll.set)
 
     def _toggle_auto(self):
         if getattr(self, '_auto_refresh', True):

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller打包配置
-智能选股系统 v3.0
+智能选股系统 v5.0 - 金策智算融合版
 
 打包命令：
     pyinstaller build.spec
@@ -21,6 +21,7 @@ a = Analysis(
         'pandas',
         'numpy',
         'requests',
+        'risk_guard',  # 门下省风控引擎
     ],
     hookspath=[],
     hooksconfig={},
