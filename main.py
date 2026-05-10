@@ -91,14 +91,14 @@ class StockSelectorApp:
         self.scan_results = {}          # code -> result dict
         self.scan_progress = (0, 0)     # (当前, 总数)
         self.root = tk.Tk()
-        self.root.title("智能选股系统 v5.0 - 金策智算融合版")
+        self.root.title("智能选股系统 v5.0")
         self.root.geometry("1600x950")
         self.root.minsize(1440, 800)
         self.root.configure(bg=C_BG)
         
         # 事件日志（实时分析过程）
         self.event_log: List[str] = []
-        self._log_event("系统启动", "v5.0 金策智算融合版")
+        self._log_event("系统启动", "v5.0")
 
         try:
             from ctypes import windll
@@ -190,6 +190,8 @@ class StockSelectorApp:
         col_hdr = tk.Frame(left, bg=C_BG3, height=30)
         col_hdr.pack(fill=tk.X)
         col_hdr.pack_propagate(False)
+        self._sort_key = "change_pct"  # 默认按涨跌幅排序
+        self._sort_reverse = True   # 默认降序
         headers = [
             ("名称",         0,   90),
             ("代码",         95,  70),
@@ -199,7 +201,9 @@ class StockSelectorApp:
             ("评分",        425,  60),
         ]
         for txt, x, w in headers:
-            tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=x, y=7, width=w)
+            lbl = tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2, cursor="hand2")
+            lbl.place(x=x, y=7, width=w)
+            lbl.bind("<Button-1>", lambda e, t=txt: self._toggle_sort(t))
 
         # Canvas滚动列表
         list_frame = tk.Frame(left, bg=C_BG)
@@ -232,7 +236,7 @@ class StockSelectorApp:
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         # ── 信息卡 ──
-        self.info_card = tk.Frame(right, bg=C_BG2, height=88)
+        self.info_card = tk.Frame(right, bg=C_BG2, height=98)
         self.info_card.pack(fill=tk.X, pady=(0, 6))
         self.info_card.pack_propagate(False)
         self._build_info_card(self.info_card)
@@ -296,7 +300,12 @@ class StockSelectorApp:
         self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
         self.card_matched.place(x=360, y=38, width=70)
 
-        tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=80, relwidth=1)
+        # 评分理由（操作建议下方）
+        self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 8), bg=C_BG3, fg=C_FG2,
+                                     anchor=tk.W, wraplength=420)
+        self.card_reason.place(x=12, y=56, width=420)
+
+        tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=92, relwidth=1)
 
     def _build_strategy_panel(self, parent):
         """策略分析面板"""
@@ -884,7 +893,23 @@ class StockSelectorApp:
 
         matched = result.get("matched_count", 0)
         self.card_matched.configure(text=f"通过{matched}/11")
-        
+
+        # 评分理由：汇总通过和未通过的策略
+        reasons_pass = []
+        reasons_fail = []
+        for s in result.get("strategies", []):
+            sname, matched_s, reason, score_val = s
+            if matched_s:
+                reasons_pass.append(sname)
+            else:
+                reasons_fail.append(sname)
+        reason_parts = []
+        if reasons_pass:
+            reason_parts.append(f"通过: {', '.join(reasons_pass)}")
+        if reasons_fail:
+            reason_parts.append(f"未过: {', '.join(reasons_fail[:5])}")
+        self.card_reason.configure(text=" | ".join(reason_parts))
+
         # 记录事件日志
         self._log_event(code, f"分析完成 {grade}级 总分{total_score:.0f} {sug}")
 
@@ -1000,7 +1025,9 @@ class StockSelectorApp:
     def _log_event(self, code: str, message: str):
         """记录事件到日志面板"""
         ts = time.strftime("%H:%M:%S")
-        entry = f"[{ts}] {code} {message}"
+        # 缩短日志消息避免截断：限制code长度
+        short_code = code[:4] if len(code) > 4 else code
+        entry = f"{ts} {short_code} {message}"
         self.event_log.insert(0, entry)
         self.event_log = self.event_log[:50]  # 保留最近50条
         
@@ -1030,7 +1057,7 @@ class StockSelectorApp:
     def _build_event_log_panel(self, body):
         """右侧：事件日志面板（三省六部风格）"""
         # 事件日志面板（最右侧窄条）
-        log_panel = tk.Frame(body, bg=C_BG2, width=200)
+        log_panel = tk.Frame(body, bg=C_BG2, width=220)
         log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
         log_panel.pack_propagate(False)
 
@@ -1054,7 +1081,7 @@ class StockSelectorApp:
 
         self.event_listbox = tk.Listbox(
             list_frame,
-            font=FONT_EVENT,
+            font=("Consolas", 8),
             bg=C_BG,
             fg=C_FG2,
             selectbackground=C_BG4,
@@ -1062,6 +1089,8 @@ class StockSelectorApp:
             highlightthickness=0,
             bd=0,
             activestyle='none',
+            padx=4,
+            pady=1,
         )
         self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -1069,6 +1098,114 @@ class StockSelectorApp:
         log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
         log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.event_listbox.configure(yscrollcommand=log_scroll.set)
+
+    def _toggle_sort(self, header_text):
+        """点击列头排序"""
+        sort_map = {
+            "名称": "name", "代码": "code", "现价": "price",
+            "涨跌幅": "change_pct", "成交额(万)": "amount", "评分": None,
+        }
+        key = sort_map.get(header_text, "change_pct")
+        if key == self._sort_key:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_key = key
+            self._sort_reverse = True
+        self._re_render_pool()
+        arrow = "↓" if self._sort_reverse else "↑"
+        self.pool_sort_label.configure(text=f"按{header_text}排序 {arrow} | 点击查看详情")
+
+    def _re_render_pool(self):
+        """按当前排序重新渲染股票池"""
+        if not self.pool_data:
+            return
+        key = self._sort_key
+        if key == "评分":
+            # 按扫描评分排序
+            def get_score(q):
+                c = q.get("code", "")
+                if hasattr(self, 'scan_results') and c in self.scan_results:
+                    return self.scan_results[c].get("total_score", -1)
+                return -1
+            self.pool_data.sort(key=get_score, reverse=self._sort_reverse)
+        else:
+            self.pool_data.sort(key=lambda x: x.get(key, 0) or 0, reverse=self._sort_reverse)
+        # 重建列表
+        for w in self.pool_inner.winfo_children():
+            w.destroy()
+        self.pool_items.clear()
+        for i, q in enumerate(self.pool_data):
+            try:
+                self._render_pool_row(i, q)
+            except Exception as e:
+                logger.error(f"重渲染第{i}行失败: {e}")
+        self.pool_inner.update_idletasks()
+        self.pool_canvas.configure(scrollregion=self.pool_canvas.bbox("all"))
+
+    def _render_pool_row(self, i, q):
+        """渲染单行股票（从pool_data）"""
+        code = q.get("code", "")
+        name = q.get("name", code) or code
+        price = q.get("price", 0) or 0
+        change = q.get("change_pct", 0) or 0
+        amount = q.get("amount", 0) or 0
+        amount_w = amount / 1e4 if amount else 0
+
+        row_bg = C_BG3 if i % 2 == 0 else C_BG
+        f = tk.Frame(self.pool_inner, bg=row_bg, height=34, cursor="hand2")
+        f.pack(fill=tk.X, padx=0, pady=0)
+        f.pack_propagate(False)
+
+        name_color = C_GREEN if change >= 0 else C_RED
+        tk.Label(f, text=f"{name}", font=FONT_BOLD, bg=row_bg, fg=name_color,
+                 width=9, anchor=tk.W).place(x=6, y=7)
+        tk.Label(f, text=f"{code}", font=FONT_CODE, bg=row_bg, fg=C_FG2,
+                 width=7, anchor=tk.W).place(x=96, y=9)
+
+        price_color = C_GREEN if change >= 0 else C_RED
+        price_str = f"{price:.2f}" if price else "--"
+        tk.Label(f, text=price_str, font=FONT_CODE, bg=row_bg, fg=price_color,
+                 width=8, anchor=tk.E).place(x=170, y=8)
+
+        change_str = f"{change:+.2f}%" if change else "--"
+        tk.Label(f, text=change_str, font=("Consolas", 9, "bold"), bg=row_bg, fg=price_color,
+                 width=9, anchor=tk.E).place(x=248, y=8)
+
+        amount_str = f"{amount_w:.0f}" if amount_w else "--"
+        tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                 width=10, anchor=tk.E).place(x=332, y=8)
+
+        if hasattr(self, 'scan_results') and code in self.scan_results:
+            r = self.scan_results[code]
+            s = r.get("total_score", -1)
+            matched = r.get("matched_count", 0)
+            if s >= 0:
+                if s >= 70:
+                    sc_color = C_GREEN
+                elif s >= 45:
+                    sc_color = C_YELLOW
+                elif s >= 20:
+                    sc_color = C_FG2
+                else:
+                    sc_color = C_RED
+                tk.Label(f, text=f"{s}", font=FONT_BOLD, bg=row_bg, fg=sc_color,
+                         width=5, anchor=tk.CENTER).place(x=430, y=7)
+                if matched > 0:
+                    tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
+                             width=4, anchor=tk.W).place(x=462, y=10)
+            else:
+                tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                         width=5, anchor=tk.CENTER).place(x=430, y=8)
+        else:
+            tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                     width=5, anchor=tk.CENTER).place(x=430, y=8)
+
+        q["row_bg"] = row_bg
+        f.code_ref = code
+        f.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
+        for child in f.winfo_children():
+            child.bind("<Button-1>", lambda e, c=code: self._select_and_show(c))
+        self.pool_items.append(f)
 
     def _toggle_auto(self):
         if getattr(self, '_auto_refresh', True):
