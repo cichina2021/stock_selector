@@ -1024,59 +1024,51 @@ class StockSelectorApp:
             if self.event_log:
                 self.event_listbox.see(0)
 
-        # ═══════════════════════════════════════════════════════
-        #  事件日志面板 - 增强显示（可调边距）
-        # ═══════════════════════════════════════════════════════
-        def _build_event_log_panel(self, body):
-            """右侧：事件日志面板（三省六部风格）"""
-            # 事件日志面板（最右侧窄条）
-            log_panel = tk.Frame(body, bg=C_BG2, width=200)
-            log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
-            log_panel.pack_propagate(False)
+    # ═══════════════════════════════════════════════════════
+    #  事件日志面板 - 增强显示（可调边距）
+    # ═══════════════════════════════════════════════════════
+    def _build_event_log_panel(self, body):
+        """右侧：事件日志面板（三省六部风格）"""
+        # 事件日志面板（最右侧窄条）
+        log_panel = tk.Frame(body, bg=C_BG2, width=200)
+        log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        log_panel.pack_propagate(False)
 
-            # 标题
-            hdr = tk.Frame(log_panel, bg=C_BG3, height=34)
-            hdr.pack(fill=tk.X)
-            hdr.pack_propagate(False)
-            tk.Label(hdr, text="📜 事件日志", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+        # 标题
+        hdr = tk.Frame(log_panel, bg=C_BG3, height=34)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📜 事件日志", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
 
-            # 风控状态指示灯
-            risk_status = tk.Frame(log_panel, bg=C_BG3, height=40)
-            risk_status.pack(fill=tk.X)
-            risk_status.pack_propagate(False)
-            
-            self.risk_indicator = tk.Label(risk_status, text="● 正常", font=FONT_BOLD, bg=C_BG3, fg=C_GREEN)
-            self.risk_indicator.pack(pady=8)
-            
-            # 事件列表 - 增加左右边距
-            list_frame = tk.Frame(log_panel, bg=C_BG)
-            list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-            
-            self.event_listbox = tk.Listbox(
-                list_frame,
-                font=FONT_EVENT,
-                bg=C_BG,
-                fg=C_FG2,
-                selectbackground=C_BG4,
-                selectforeground=C_FG,
-                highlightthickness=0,
-                bd=0,
-                activestyle='none',
-                
-                # 关键：增加左右内边距
-                selectborderwidth=0,
-                iosetdrag=1,
-            )
-            # 使用 listbox 内部的 padding 样式
-            self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            # 添加样式配置（通过 tag 配置行内边距）
-            self.event_listbox.tag_configure("entry", padding=(5, 2))  # 左5像素边距
-            
-            # 滚动条
-            log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
-            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-            self.event_listbox.configure(yscrollcommand=log_scroll.set)
+        # 风控状态指示灯
+        risk_status = tk.Frame(log_panel, bg=C_BG3, height=40)
+        risk_status.pack(fill=tk.X)
+        risk_status.pack_propagate(False)
+
+        self.risk_indicator = tk.Label(risk_status, text="● 正常", font=FONT_BOLD, bg=C_BG3, fg=C_GREEN)
+        self.risk_indicator.pack(pady=8)
+
+        # 事件列表 - 增加左右边距
+        list_frame = tk.Frame(log_panel, bg=C_BG)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.event_listbox = tk.Listbox(
+            list_frame,
+            font=FONT_EVENT,
+            bg=C_BG,
+            fg=C_FG2,
+            selectbackground=C_BG4,
+            selectforeground=C_FG,
+            highlightthickness=0,
+            bd=0,
+            activestyle='none',
+        )
+        self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # 滚动条
+        log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.event_listbox.configure(yscrollcommand=log_scroll.set)
 
     def _toggle_auto(self):
         if getattr(self, '_auto_refresh', True):
