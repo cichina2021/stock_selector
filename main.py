@@ -1089,8 +1089,6 @@ class StockSelectorApp:
             highlightthickness=0,
             bd=0,
             activestyle='none',
-            padx=4,
-            pady=1,
         )
         self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
