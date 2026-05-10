@@ -489,15 +489,30 @@ class StockSelectorApp:
 
     def _show_pool_with_scores(self):
         """用扫描结果重新渲染股票池（带评分）"""
+        # 安全检查：如果没有行情数据，直接返回
+        if not self.pool_data:
+            logger.warning("_show_pool_with_scores: pool_data为空，跳过")
+            return
+        
+        # 安全检查：如果没有扫描结果，返回
+        if not self.scan_results:
+            logger.warning("_show_pool_with_scores: scan_results为空，跳过")
+            return
+        
+        logger.info(f"渲染评分列表: pool_data={len(self.pool_data)}条, scan_results={len(self.scan_results)}条")
+        
         # 合并行情数据 + 评分数据
         scored_pool = []
         for q in self.pool_data:
             code = q.get("code", "")
+            if not code:
+                continue
             if code in self.scan_results:
                 r = self.scan_results[code]
                 q["score"] = r.get("total_score", 0)
                 q["suggestion"] = r.get("suggestion", "")
                 q["matched"] = r.get("matched_count", 0)
+                logger.info(f"  {code}: score={q['score']}")
             else:
                 q["score"] = -1  # 未扫描
                 q["suggestion"] = ""
@@ -564,7 +579,10 @@ class StockSelectorApp:
                 tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
                          width=10, anchor=tk.E).place(x=332, y=8)
 
-                # 评分（核心！）
+                # 评分（核心！）- 确保总是显示
+                if score is None:
+                    score = -1
+                
                 if score >= 0:
                     if score >= 70:
                         sc_color = C_GREEN
@@ -578,20 +596,20 @@ class StockSelectorApp:
                     else:
                         sc_color = C_RED
                         sc_text = f"{score}"
-
-                    # 评分数字
-                    sc_lbl = tk.Label(f, text=sc_text, font=FONT_BOLD, bg=row_bg, fg=sc_color,
-                                      width=5, anchor=tk.CENTER)
-                    sc_lbl.place(x=430, y=7)
-
-                    # 通过数小标记
-                    if matched > 0:
-                        m_lbl = tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
-                                         width=4, anchor=tk.W)
-                        m_lbl.place(x=462, y=10)
                 else:
-                    tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                             width=5, anchor=tk.CENTER).place(x=430, y=8)
+                    sc_color = C_FG2
+                    sc_text = "-"
+                
+                # 评分数字
+                sc_lbl = tk.Label(f, text=sc_text, font=FONT_BOLD, bg=row_bg, fg=sc_color,
+                                  width=5, anchor=tk.CENTER)
+                sc_lbl.place(x=430, y=7)
+
+                # 通过数小标记
+                if matched > 0:
+                    m_lbl = tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
+                                     width=4, anchor=tk.W)
+                    m_lbl.place(x=462, y=10)
 
                 # 绑定事件
                 f.code_ref = code
@@ -636,7 +654,7 @@ class StockSelectorApp:
         threading.Thread(target=do_refresh, daemon=True).start()
 
     def _show_pool(self, quotes):
-        """显示股票池列表（纯行情，无评分——扫描完成后会覆盖为带评分版本）"""
+        """显示股票池列表 - 自动保留已扫描的评分"""
         try:
             self.refresh_btn.configure(text="🔄 刷新行情", state=tk.NORMAL)
             self.stats_label.configure(text=f"股票池: {len(quotes)} 只  |  更新时间 {time.strftime('%H:%M:%S')}")
@@ -688,8 +706,31 @@ class StockSelectorApp:
                     tk.Label(f, text=amount_str, font=FONT_SMALL, bg=row_bg, fg=C_FG2,
                              width=10, anchor=tk.E).place(x=332, y=8)
 
-                    tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
-                             width=5, anchor=tk.CENTER).place(x=430, y=8)
+                    # 保留已扫描的评分（如果scan_results中有）
+                    if hasattr(self, 'scan_results') and code in self.scan_results:
+                        r = self.scan_results[code]
+                        s = r.get("total_score", -1)
+                        matched = r.get("matched_count", 0)
+                        if s >= 0:
+                            if s >= 70:
+                                sc_color = C_GREEN
+                            elif s >= 45:
+                                sc_color = C_YELLOW
+                            elif s >= 20:
+                                sc_color = C_FG2
+                            else:
+                                sc_color = C_RED
+                            tk.Label(f, text=f"{s}", font=FONT_BOLD, bg=row_bg, fg=sc_color,
+                                     width=5, anchor=tk.CENTER).place(x=430, y=7)
+                            if matched > 0:
+                                tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
+                                         width=4, anchor=tk.W).place(x=462, y=10)
+                        else:
+                            tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                                     width=5, anchor=tk.CENTER).place(x=430, y=8)
+                    else:
+                        tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
+                                 width=5, anchor=tk.CENTER).place(x=430, y=8)
 
                     q["row_bg"] = row_bg
                     self.pool_data.append(q)
@@ -958,11 +999,18 @@ class StockSelectorApp:
 
     def _log_event(self, code: str, message: str):
         """记录事件到日志面板"""
-        import time
         ts = time.strftime("%H:%M:%S")
         entry = f"[{ts}] {code} {message}"
         self.event_log.insert(0, entry)
         self.event_log = self.event_log[:50]  # 保留最近50条
+        
+        # 保存到文件供调试
+        try:
+            with open(os.path.join(WORK_DIR, "scan_log.txt"), "a", encoding="utf-8") as f:
+                f.write(entry + "\n")
+        except:
+            pass
+        
         if hasattr(self, 'event_listbox'):
             self.root.after(0, self._update_event_display)
 
@@ -976,48 +1024,59 @@ class StockSelectorApp:
             if self.event_log:
                 self.event_listbox.see(0)
 
-    def _build_event_log_panel(self, body):
-        """右侧：事件日志面板（三省六部风格）"""
-        # 事件日志面板（最右侧窄条）
-        log_panel = tk.Frame(body, bg=C_BG2, width=200)
-        log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
-        log_panel.pack_propagate(False)
+        # ═══════════════════════════════════════════════════════
+        #  事件日志面板 - 增强显示（可调边距）
+        # ═══════════════════════════════════════════════════════
+        def _build_event_log_panel(self, body):
+            """右侧：事件日志面板（三省六部风格）"""
+            # 事件日志面板（最右侧窄条）
+            log_panel = tk.Frame(body, bg=C_BG2, width=200)
+            log_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+            log_panel.pack_propagate(False)
 
-        # 标题
-        hdr = tk.Frame(log_panel, bg=C_BG3, height=34)
-        hdr.pack(fill=tk.X)
-        hdr.pack_propagate(False)
-        tk.Label(hdr, text="📜 事件日志", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
+            # 标题
+            hdr = tk.Frame(log_panel, bg=C_BG3, height=34)
+            hdr.pack(fill=tk.X)
+            hdr.pack_propagate(False)
+            tk.Label(hdr, text="📜 事件日志", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=8)
 
-        # 风控状态指示灯
-        risk_status = tk.Frame(log_panel, bg=C_BG3, height=40)
-        risk_status.pack(fill=tk.X)
-        risk_status.pack_propagate(False)
-        
-        self.risk_indicator = tk.Label(risk_status, text="● 正常", font=FONT_BOLD, bg=C_BG3, fg=C_GREEN)
-        self.risk_indicator.pack(pady=8)
-        
-        # 事件列表
-        list_frame = tk.Frame(log_panel, bg=C_BG)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        
-        self.event_listbox = tk.Listbox(
-            list_frame,
-            font=FONT_EVENT,
-            bg=C_BG,
-            fg=C_FG2,
-            selectbackground=C_BG4,
-            selectforeground=C_FG,
-            highlightthickness=0,
-            bd=0,
-            activestyle='none'
-        )
-        self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # 滚动条
-        log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.event_listbox.configure(yscrollcommand=log_scroll.set)
+            # 风控状态指示灯
+            risk_status = tk.Frame(log_panel, bg=C_BG3, height=40)
+            risk_status.pack(fill=tk.X)
+            risk_status.pack_propagate(False)
+            
+            self.risk_indicator = tk.Label(risk_status, text="● 正常", font=FONT_BOLD, bg=C_BG3, fg=C_GREEN)
+            self.risk_indicator.pack(pady=8)
+            
+            # 事件列表 - 增加左右边距
+            list_frame = tk.Frame(log_panel, bg=C_BG)
+            list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            
+            self.event_listbox = tk.Listbox(
+                list_frame,
+                font=FONT_EVENT,
+                bg=C_BG,
+                fg=C_FG2,
+                selectbackground=C_BG4,
+                selectforeground=C_FG,
+                highlightthickness=0,
+                bd=0,
+                activestyle='none',
+                
+                # 关键：增加左右内边距
+                selectborderwidth=0,
+                iosetdrag=1,
+            )
+            # 使用 listbox 内部的 padding 样式
+            self.event_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # 添加样式配置（通过 tag 配置行内边距）
+            self.event_listbox.tag_configure("entry", padding=(5, 2))  # 左5像素边距
+            
+            # 滚动条
+            log_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.event_listbox.yview)
+            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            self.event_listbox.configure(yscrollcommand=log_scroll.set)
 
     def _toggle_auto(self):
         if getattr(self, '_auto_refresh', True):
