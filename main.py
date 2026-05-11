@@ -174,7 +174,7 @@ class StockSelectorApp:
 
     def _build_pool_panel(self, body):
         """左侧：股票池列表（名称+代码+现价+涨跌幅+成交额+评分）"""
-        left = tk.Frame(body, bg=C_BG, width=520)
+        left = tk.Frame(body, bg=C_BG, width=580)
         left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 6))
         left.pack_propagate(False)
 
@@ -199,6 +199,7 @@ class StockSelectorApp:
             ("涨跌幅",      245,  80),
             ("成交额(万)",  330,  90),
             ("评分",        425,  60),
+            ("建议",        490,  70),
         ]
         for txt, x, w in headers:
             lbl = tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2, cursor="hand2")
@@ -1177,6 +1178,7 @@ class StockSelectorApp:
             r = self.scan_results[code]
             s = r.get("total_score", -1)
             matched = r.get("matched_count", 0)
+            sug = r.get("suggestion", "")
             if s >= 0:
                 if s >= 70:
                     sc_color = C_GREEN
@@ -1191,6 +1193,22 @@ class StockSelectorApp:
                 if matched > 0:
                     tk.Label(f, text=f"+{matched}", font=FONT_SMALL, bg=row_bg, fg=C_GREEN,
                              width=4, anchor=tk.W).place(x=462, y=10)
+                # 操作建议列
+                if sug:
+                    if "买入" in sug:
+                        sug_color = C_GREEN
+                        sug_text = "🟢买入"
+                    elif "关注" in sug or "观望" in sug:
+                        sug_color = C_YELLOW
+                        sug_text = "🟡关注"
+                    else:
+                        sug_color = C_FG2
+                        sug_text = "⚪观望"
+                else:
+                    sug_color = C_FG2
+                    sug_text = "--"
+                tk.Label(f, text=sug_text, font=("Consolas", 9), bg=row_bg, fg=sug_color,
+                         width=7, anchor=tk.CENTER).place(x=495, y=8)
             else:
                 tk.Label(f, text="-", font=FONT_SMALL, bg=row_bg, fg=C_FG2,
                          width=5, anchor=tk.CENTER).place(x=430, y=8)
