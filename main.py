@@ -236,7 +236,7 @@ class StockSelectorApp:
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         # ── 信息卡 ──
-        self.info_card = tk.Frame(right, bg=C_BG2, height=98)
+        self.info_card = tk.Frame(right, bg=C_BG2, height=110)
         self.info_card.pack(fill=tk.X, pady=(0, 6))
         self.info_card.pack_propagate(False)
         self._build_info_card(self.info_card)
@@ -272,40 +272,40 @@ class StockSelectorApp:
 
         # ── 四维度评分卡（借鉴金策礼部）──────────────────
         score_bg = tk.Frame(parent, bg=C_BG3, highlightthickness=1, highlightbackground=C_BORDER)
-        score_bg.place(x=360, y=8, width=440, height=68)
+        score_bg.place(x=360, y=8, width=440, height=95)
         
         # 等级（S/A/B/C/D）
         self.card_grade = tk.Label(score_bg, text="-", font=FONT_GRADE, bg=C_BG3, fg=C_FG2)
-        self.card_grade.place(x=12, y=8, width=80, height=50)
-        tk.Label(score_bg, text="评级", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=30, y=50)
+        self.card_grade.place(x=12, y=6, width=80, height=46)
+        tk.Label(score_bg, text="评级", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=30, y=46)
         
         # 四维度分数
         dim_x = 100
         self.card_profit = tk.Label(score_bg, text="盈利 --", font=FONT_SMALL, bg=C_BG3, fg=C_GREEN)
-        self.card_profit.place(x=dim_x, y=12, width=85)
+        self.card_profit.place(x=dim_x, y=8, width=90)
         self.card_risk = tk.Label(score_bg, text="风控 --", font=FONT_SMALL, bg=C_BG3, fg=C_RED)
-        self.card_risk.place(x=dim_x+90, y=12, width=85)
+        self.card_risk.place(x=dim_x+95, y=8, width=90)
         self.card_quality = tk.Label(score_bg, text="质量 --", font=FONT_SMALL, bg=C_BG3, fg=C_CYAN)
-        self.card_quality.place(x=dim_x, y=32, width=85)
+        self.card_quality.place(x=dim_x, y=28, width=90)
         self.card_practical = tk.Label(score_bg, text="实战 --", font=FONT_SMALL, bg=C_BG3, fg=C_YELLOW)
-        self.card_practical.place(x=dim_x+90, y=32, width=85)
+        self.card_practical.place(x=dim_x+95, y=28, width=90)
         
         # 总分
         self.card_score = tk.Label(score_bg, text="总分 --", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT)
-        self.card_score.place(x=280, y=18, width=80)
+        self.card_score.place(x=290, y=14, width=80)
         
         # 操作建议
         self.card_suggest = tk.Label(score_bg, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
-        self.card_suggest.place(x=360, y=18, width=70)
+        self.card_suggest.place(x=370, y=8, width=60)
         self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
-        self.card_matched.place(x=360, y=38, width=70)
+        self.card_matched.place(x=370, y=28, width=60)
 
-        # 评分理由（操作建议下方）
-        self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 8), bg=C_BG3, fg=C_FG2,
+        # 评分理由（单独一行，下方）
+        self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 9), bg=C_BG3, fg=C_FG2,
                                      anchor=tk.W, wraplength=420)
         self.card_reason.place(x=12, y=56, width=420)
 
-        tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=92, relwidth=1)
+        tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=106, relwidth=1)
 
     def _build_strategy_panel(self, parent):
         """策略分析面板"""
@@ -1101,7 +1101,7 @@ class StockSelectorApp:
         """点击列头排序"""
         sort_map = {
             "名称": "name", "代码": "code", "现价": "price",
-            "涨跌幅": "change_pct", "成交额(万)": "amount", "评分": None,
+            "涨跌幅": "change_pct", "成交额(万)": "amount", "评分": "score",
         }
         key = sort_map.get(header_text, "change_pct")
         if key == self._sort_key:
@@ -1118,7 +1118,7 @@ class StockSelectorApp:
         if not self.pool_data:
             return
         key = self._sort_key
-        if key == "评分":
+        if key == "score":
             # 按扫描评分排序
             def get_score(q):
                 c = q.get("code", "")
