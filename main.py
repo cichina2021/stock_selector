@@ -254,6 +254,9 @@ class StockSelectorApp:
         self._build_strategy_panel(left_mid)
         self._build_price_panel(right_mid)
 
+        # ── 操作建议详情 ──
+        self._build_advice_panel(right)
+
         # ── 底部板块 ──
         self._build_sector_panel(right)
 
@@ -293,14 +296,14 @@ class StockSelectorApp:
         self.card_score = tk.Label(score_bg, text="总分 --", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT)
         self.card_score.place(x=245, y=14, width=60)
         
-        # 操作建议
-        self.card_suggest = tk.Label(score_bg, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
-        self.card_suggest.place(x=310, y=8, width=60)
+        # 操作建议（大字醒目）
+        self.card_suggest = tk.Label(score_bg, text="--", font=("Microsoft YaHei", 13, "bold"), bg=C_BG3, fg=C_FG2)
+        self.card_suggest.place(x=308, y=6, width=120, height=28)
         self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
-        self.card_matched.place(x=310, y=28, width=60)
+        self.card_matched.place(x=308, y=34, width=120)
 
-        # 评分理由（单独一行，下方）
-        self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 9), bg=C_BG3, fg=C_FG2,
+        # 评分理由（单独一行，下方，加粗加清晰）
+        self.card_reason = tk.Label(score_bg, text="", font=("Microsoft YaHei", 10, "bold"), bg=C_BG3, fg=C_FG2,
                                      anchor=tk.W, wraplength=460)
         self.card_reason.place(x=8, y=56, width=460)
 
@@ -394,6 +397,50 @@ class StockSelectorApp:
         tk.Label(self.price_container, text="🎯 K线形态", font=FONT_BOLD, bg=C_BG, fg=C_ACCENT).pack(anchor=tk.W, pady=2)
         self.price_patterns = tk.Label(self.price_container, text="暂无形态", font=FONT_SMALL, bg=C_BG, fg=C_FG2, wraplength=270, justify=tk.LEFT)
         self.price_patterns.pack(anchor=tk.W, pady=2)
+
+    def _build_advice_panel(self, parent):
+        """操作建议详情面板 - 大字醒目显示买入理由和操作建议"""
+        # 标题栏
+        hdr = tk.Frame(parent, bg=C_BG2, height=34)
+        hdr.pack(fill=tk.X, pady=(6, 0))
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📋 操作建议详情", font=FONT_BOLD, bg=C_BG2, fg=C_ACCENT).pack(side=tk.LEFT, padx=12, pady=6)
+
+        # 主体内容区
+        body = tk.Frame(parent, bg=C_BG3, height=100)
+        body.pack(fill=tk.X, padx=6, pady=(0, 6))
+        body.pack_propagate(False)
+
+        # 第一行：操作建议（大字）+ 风险收益比
+        row1 = tk.Frame(body, bg=C_BG3)
+        row1.pack(fill=tk.X, padx=12, pady=(10, 4))
+
+        self.advice_suggest = tk.Label(row1, text="--", font=("Microsoft YaHei", 16, "bold"), bg=C_BG3, fg=C_FG2)
+        self.advice_suggest.pack(side=tk.LEFT)
+
+        self.advice_ratio = tk.Label(row1, text="风险收益比  --", font=FONT_MAIN, bg=C_BG3, fg=C_FG2)
+        self.advice_ratio.pack(side=tk.RIGHT)
+
+        # 第二行：买入理由
+        row2 = tk.Frame(body, bg=C_BG3)
+        row2.pack(fill=tk.X, padx=12, pady=(0, 4))
+
+        tk.Label(row2, text="📌 买入理由：", font=("Microsoft YaHei", 10, "bold"), bg=C_BG3, fg=C_ACCENT).pack(side=tk.LEFT)
+        self.advice_reasons = tk.Label(row2, text="--", font=("Microsoft YaHei", 10), bg=C_BG3, fg=C_GREEN, anchor=tk.W, wraplength=620)
+        self.advice_reasons.pack(side=tk.LEFT, padx=(4, 0), fill=tk.X, expand=True)
+
+        # 第三行：关键价位
+        row3 = tk.Frame(body, bg=C_BG3)
+        row3.pack(fill=tk.X, padx=12, pady=(0, 10))
+
+        self.advice_stop = tk.Label(row3, text="止损价  --", font=FONT_MAIN, bg=C_BG3, fg=C_YELLOW)
+        self.advice_stop.pack(side=tk.LEFT, padx=(0, 16))
+        self.advice_target = tk.Label(row3, text="目标价  --", font=FONT_MAIN, bg=C_BG3, fg=C_ACCENT)
+        self.advice_target.pack(side=tk.LEFT, padx=(0, 16))
+        self.advice_buyzone = tk.Label(row3, text="买入区间  --", font=FONT_MAIN, bg=C_BG3, fg=C_GREEN)
+        self.advice_buyzone.pack(side=tk.LEFT, padx=(0, 16))
+        self.advice_matched = tk.Label(row3, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
+        self.advice_matched.pack(side=tk.LEFT)
 
     def _build_sector_panel(self, parent):
         """底部板块热点"""
@@ -981,6 +1028,46 @@ class StockSelectorApp:
             self.price_patterns.configure(text=p_text, fg=C_FG)
         else:
             self.price_patterns.configure(text="暂无明确形态", fg=C_FG2)
+
+        # ── 操作建议详情面板 ─────────────────────────
+        sug = result.get("suggestion", "")
+        if "买入" in sug:
+            sug_color = C_GREEN
+            sug_icon = "🟢"
+        elif "关注" in sug:
+            sug_color = C_YELLOW
+            sug_icon = "🟡"
+        else:
+            sug_color = C_FG2
+            sug_icon = "⚪"
+        self.advice_suggest.configure(text=f"{sug_icon} {sug}", fg=sug_color)
+
+        ratio = result.get("risk_reward_ratio", 0)
+        if ratio:
+            rc = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
+            self.advice_ratio.configure(text=f"风险收益比 {ratio:.2f} : 1", fg=rc)
+        else:
+            self.advice_ratio.configure(text="风险收益比  --", fg=C_FG2)
+
+        # 买入理由：汇总通过策略的核心逻辑
+        matched_strategies = [s[0] for s in result.get("strategies", []) if s[1]]
+        matched_count = len(matched_strategies)
+        if matched_strategies:
+            reasons_text = "、".join(matched_strategies)
+            self.advice_reasons.configure(text=f"{reasons_text}", fg=C_GREEN)
+        else:
+            self.advice_reasons.configure(text="暂无策略通过", fg=C_FG2)
+
+        stop = result.get("stop_loss", 0)
+        self.advice_stop.configure(text=f"止损价  ¥{stop:.2f}" if stop else "止损价  --")
+        target = result.get("target_price", 0)
+        self.advice_target.configure(text=f"目标价  ¥{target:.2f}" if target else "目标价  --")
+        buy_zone = result.get("buy_zone", {})
+        if buy_zone and buy_zone.get("low"):
+            self.advice_buyzone.configure(text=f"买入区间 ¥{buy_zone['low']:.2f}~¥{buy_zone['high']:.2f}")
+        else:
+            self.advice_buyzone.configure(text="买入区间  --")
+        self.advice_matched.configure(text=f"通过 {matched_count}/11 策略")
 
         # ── 风控状态显示 ──────────────────────────────
         risk_approved = result.get("risk_approved", True)
