@@ -168,9 +168,8 @@ class StockSelectorApp:
         self._build_pool_panel(body)
         tk.Frame(body, bg=C_BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # 右侧：分析详情 + 事件日志
+        # 右侧：分析详情（无需事件日志）
         self._build_detail_panel(body)
-        self._build_event_log_panel(body)
 
     def _build_pool_panel(self, body):
         """左侧：股票池列表（名称+代码+现价+涨跌幅+成交额+评分）"""
@@ -199,7 +198,6 @@ class StockSelectorApp:
             ("涨跌幅",      245,  80),
             ("成交额(万)",  330,  90),
             ("评分",        425,  60),
-            ("建议",        490,  70),
         ]
         for txt, x, w in headers:
             lbl = tk.Label(col_hdr, text=txt, font=FONT_SMALL, bg=C_BG3, fg=C_FG2, cursor="hand2")
@@ -273,7 +271,7 @@ class StockSelectorApp:
 
         # ── 四维度评分卡（借鉴金策礼部）──────────────────
         score_bg = tk.Frame(parent, bg=C_BG3, highlightthickness=1, highlightbackground=C_BORDER)
-        score_bg.place(x=320, y=8, width=380, height=95)
+        score_bg.place(x=320, y=8, width=480, height=95)
         
         # 等级（S/A/B/C/D）
         self.card_grade = tk.Label(score_bg, text="-", font=FONT_GRADE, bg=C_BG3, fg=C_FG2)
@@ -303,8 +301,8 @@ class StockSelectorApp:
 
         # 评分理由（单独一行，下方）
         self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 9), bg=C_BG3, fg=C_FG2,
-                                     anchor=tk.W, wraplength=360)
-        self.card_reason.place(x=8, y=56, width=360)
+                                     anchor=tk.W, wraplength=460)
+        self.card_reason.place(x=8, y=56, width=460)
 
         tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=106, relwidth=1)
 
