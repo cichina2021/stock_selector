@@ -272,38 +272,38 @@ class StockSelectorApp:
 
         # ── 四维度评分卡（借鉴金策礼部）──────────────────
         score_bg = tk.Frame(parent, bg=C_BG3, highlightthickness=1, highlightbackground=C_BORDER)
-        score_bg.place(x=360, y=8, width=440, height=95)
+        score_bg.place(x=320, y=8, width=380, height=95)
         
         # 等级（S/A/B/C/D）
         self.card_grade = tk.Label(score_bg, text="-", font=FONT_GRADE, bg=C_BG3, fg=C_FG2)
-        self.card_grade.place(x=12, y=6, width=80, height=46)
-        tk.Label(score_bg, text="评级", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=30, y=46)
+        self.card_grade.place(x=8, y=6, width=70, height=46)
+        tk.Label(score_bg, text="评级", font=FONT_SMALL, bg=C_BG3, fg=C_FG2).place(x=24, y=46)
         
         # 四维度分数
-        dim_x = 100
+        dim_x = 85
         self.card_profit = tk.Label(score_bg, text="盈利 --", font=FONT_SMALL, bg=C_BG3, fg=C_GREEN)
-        self.card_profit.place(x=dim_x, y=8, width=90)
+        self.card_profit.place(x=dim_x, y=8, width=75)
         self.card_risk = tk.Label(score_bg, text="风控 --", font=FONT_SMALL, bg=C_BG3, fg=C_RED)
-        self.card_risk.place(x=dim_x+95, y=8, width=90)
+        self.card_risk.place(x=dim_x+78, y=8, width=75)
         self.card_quality = tk.Label(score_bg, text="质量 --", font=FONT_SMALL, bg=C_BG3, fg=C_CYAN)
-        self.card_quality.place(x=dim_x, y=28, width=90)
+        self.card_quality.place(x=dim_x, y=28, width=75)
         self.card_practical = tk.Label(score_bg, text="实战 --", font=FONT_SMALL, bg=C_BG3, fg=C_YELLOW)
-        self.card_practical.place(x=dim_x+95, y=28, width=90)
+        self.card_practical.place(x=dim_x+78, y=28, width=75)
         
         # 总分
         self.card_score = tk.Label(score_bg, text="总分 --", font=FONT_BOLD, bg=C_BG3, fg=C_ACCENT)
-        self.card_score.place(x=290, y=14, width=80)
+        self.card_score.place(x=245, y=14, width=60)
         
         # 操作建议
         self.card_suggest = tk.Label(score_bg, text="--", font=FONT_BOLD, bg=C_BG3, fg=C_FG2)
-        self.card_suggest.place(x=370, y=8, width=60)
+        self.card_suggest.place(x=310, y=8, width=60)
         self.card_matched = tk.Label(score_bg, text="", font=FONT_SMALL, bg=C_BG3, fg=C_FG2)
-        self.card_matched.place(x=370, y=28, width=60)
+        self.card_matched.place(x=310, y=28, width=60)
 
         # 评分理由（单独一行，下方）
         self.card_reason = tk.Label(score_bg, text="", font=("Consolas", 9), bg=C_BG3, fg=C_FG2,
-                                     anchor=tk.W, wraplength=420)
-        self.card_reason.place(x=12, y=56, width=420)
+                                     anchor=tk.W, wraplength=360)
+        self.card_reason.place(x=8, y=56, width=360)
 
         tk.Frame(parent, bg=C_BORDER, height=1).place(x=0, y=106, relwidth=1)
 
