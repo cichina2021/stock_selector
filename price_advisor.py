@@ -86,24 +86,46 @@ class PriceAdvisor:
         if not near_resistance:
             near_resistance = [round(current * 1.05, 2), round(current * 1.10, 2)]
 
-        # 买入区间：最近支撑位附近
-        buy_low = near_support[0] if near_support else round(current * 0.95, 2)
-        buy_high = round(current * 0.995, 2)  # 接近现价
+        # ===== 买入区间：支撑位到现价之间 =====
+        # 取最近的强支撑作为买入下限
+        best_support = near_support[0] if near_support else round(current * 0.95, 2)
+        # 买入上限：现价下方一点点（给一点回调空间）
+        buy_high = round(current * 0.98, 2)  # 现价-2%，留出回调空间
+        buy_low = min(best_support, buy_high * 0.97)  # 确保低 < 高
 
-        # 卖出区间：最近阻力位附近
-        sell_low = round(current * 1.005, 2)  # 接近现价
-        sell_high = near_resistance[0] if near_resistance else round(current * 1.05, 2)
+        # ===== 卖出区间：阻力位附近 =====
+        sell_low = round(current * 1.02, 2)  # 现价+2%
+        sell_high = near_resistance[0] if near_resistance else round(current * 1.08, 2)
 
-        # 止损位：跌破最近强支撑
-        stop_loss = near_support[min(1, len(near_support)-1)] if len(near_support) > 1 else round(buy_low * 0.97, 2)
+        # ===== 止损位：跌破最近强支撑下方3% =====
+        stop_loss = round(best_support * 0.97, 2)
 
-        # 目标价：第一阻力位或更高
-        target = near_resistance[0] if near_resistance else round(current * 1.08, 2)
+        # ===== 目标价：取有意义的上涨空间 =====
+        # 规则1：优先取第二阻力位（第一阻力太近没利润）
+        # 规则2：如果只有一个阻力位或第一阻力涨幅<5%，用更远的目标
+        if len(near_resistance) >= 2:
+            # 有多个阻力位时，取第二阻力作为目标（第一阻力是短线减仓点）
+            target = near_resistance[1]
+        elif near_resistance:
+            first_r = near_resistance[0]
+            gain_pct = (first_r - current) / current * 100
+            if gain_pct >= 5:
+                # 第一阻力位涨幅≥5%，可以用作目标
+                target = first_r
+            else:
+                # 涨幅太小，取更高的目标（至少5%）
+                target = max(first_r, round(current * 1.05, 2))
+        else:
+            target = round(current * 1.08, 2)
+
+        # 如果目标价还是太接近现价（<3%），强制拉到8%
+        if (target - current) / current < 0.03:
+            target = round(current * 1.08, 2)
 
         # 风险收益比
         risk = current - stop_loss
         reward = target - current
-        ratio = reward / risk if risk > 0 else 0
+        ratio = round(reward / risk, 2) if risk > 0 else -1
 
         # 构建理由
         buy_reason = f"靠近{len(near_support)}个支撑位"

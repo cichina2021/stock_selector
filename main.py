@@ -1013,9 +1013,19 @@ class StockSelectorApp:
         self.price_target.configure(text=f"目标价  ¥{target:.2f}" if target else "目标价  --")
 
         ratio = result.get("risk_reward_ratio", 0)
-        if ratio:
-            rc = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
-            self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=rc)
+        if ratio is not None and ratio != 0:
+            if ratio < 0:
+                rc = "#FF4444"
+                self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1 ⚠️追高", fg=rc)
+            elif ratio >= 2:
+                rc = C_GREEN
+                self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=rc)
+            elif ratio >= 1:
+                rc = C_YELLOW
+                self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1", fg=rc)
+            else:
+                rc = C_FG2
+                self.price_ratio.configure(text=f"风险收益比  {ratio:.2f} : 1（偏低）", fg=rc)
         else:
             self.price_ratio.configure(text="风险收益比  --")
 
@@ -1043,9 +1053,19 @@ class StockSelectorApp:
         self.advice_suggest.configure(text=f"{sug_icon} {sug}", fg=sug_color)
 
         ratio = result.get("risk_reward_ratio", 0)
-        if ratio:
-            rc = C_GREEN if ratio >= 2 else (C_YELLOW if ratio >= 1 else C_FG2)
-            self.advice_ratio.configure(text=f"风险收益比 {ratio:.2f} : 1", fg=rc)
+        if ratio is not None and ratio != 0:
+            if ratio < 0:
+                rc = "#FF4444"  # 红色警告：追高风险
+                self.advice_ratio.configure(text=f"⚠️ 风险收益比 {ratio:.2f} : 1（追高）", fg=rc)
+            elif ratio >= 2:
+                rc = C_GREEN
+                self.advice_ratio.configure(text=f"风险收益比 {ratio:.2f} : 1", fg=rc)
+            elif ratio >= 1:
+                rc = C_YELLOW
+                self.advice_ratio.configure(text=f"风险收益比 {ratio:.2f} : 1", fg=rc)
+            else:
+                rc = C_FG2
+                self.advice_ratio.configure(text=f"风险收益比 {ratio:.2f} : 1（偏低）", fg=rc)
         else:
             self.advice_ratio.configure(text="风险收益比  --", fg=C_FG2)
 
